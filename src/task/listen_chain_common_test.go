@@ -186,6 +186,15 @@ func TestEvmLiveFilterQueryStartsAtLatest(t *testing.T) {
 	}
 }
 
+func TestEvmBackfillBatchSize(t *testing.T) {
+	if got := evmBackfillBatchSize(mdb.NetworkBsc); got != 50 {
+		t.Fatalf("BSC backfill batch size = %d, want 50", got)
+	}
+	if got := evmBackfillBatchSize(mdb.NetworkEthereum); got != evmBackfillBatchBlocks {
+		t.Fatalf("Ethereum backfill batch size = %d, want %d", got, evmBackfillBatchBlocks)
+	}
+}
+
 func TestShouldRefreshEvmLatestHeaderAfterIdleInterval(t *testing.T) {
 	lastUpdate := time.Now()
 
