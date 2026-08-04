@@ -146,7 +146,7 @@ func evmHealthFilterQuery(network, nodeType string, head uint64) (ethereum.Filte
 		Topics:    evmTransferTopics(recipients),
 	}
 	if nodeType != mdb.RpcNodeTypeHttp {
-		return query, true, nil
+		return evmLiveFilterQuery(contracts, recipients), true, nil
 	}
 	if head > uint64(1<<63-1) {
 		return ethereum.FilterQuery{}, false, fmt.Errorf("block number exceeds int64 range")

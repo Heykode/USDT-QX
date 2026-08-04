@@ -375,7 +375,15 @@ func newEvmHealthWSServer(t *testing.T, rejectSubscription bool) (*httptest.Serv
 				if rejectSubscription {
 					resp.Error = &rpcHealthTestError{Code: 15, Message: "public endpoint rate limit"}
 				} else {
-					resp.Result = "0xsubscription"
+					var params []json.RawMessage
+					var filter map[string]interface{}
+					if err = json.Unmarshal(req.Params, &params); err != nil || len(params) != 2 {
+						resp.Error = &rpcHealthTestError{Code: -32602, Message: "invalid subscription params"}
+					} else if err = json.Unmarshal(params[1], &filter); err != nil || filter["fromBlock"] != "latest" {
+						resp.Error = &rpcHealthTestError{Code: -32602, Message: "exceed maximum block range"}
+					} else {
+						resp.Result = "0xsubscription"
+					}
 				}
 			case "eth_unsubscribe":
 				resp.Result = true
