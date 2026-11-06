@@ -16,6 +16,9 @@ var spaFallbackDenyPrefixes = []string{
 // ShouldSkipSPAFallback reports whether a request path should bypass
 // server-side SPA fallback to index.html and continue normal backend routing.
 func ShouldSkipSPAFallback(requestPath string) bool {
+	if requestPath == "/api.php" {
+		return true
+	}
 	for _, prefix := range spaFallbackDenyPrefixes {
 		if requestPath == prefix || strings.HasPrefix(requestPath, prefix+"/") {
 			return true

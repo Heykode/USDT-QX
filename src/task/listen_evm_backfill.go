@@ -302,7 +302,7 @@ func evmBackfillChainConfig(network string) (*mdb.Chain, time.Duration) {
 
 func evmBackfillBatchSize(network string) int64 {
 	if network == mdb.NetworkBsc {
-		return 200
+		return 50
 	}
 	return evmBackfillBatchBlocks
 }

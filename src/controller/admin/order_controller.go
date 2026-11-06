@@ -130,7 +130,7 @@ func (c *BaseAdminController) CloseOrder(ctx echo.Context) error {
 		strings.TrimSpace(order.ReceiveAddress) != "" &&
 		strings.TrimSpace(order.Token) != "" &&
 		order.ActualAmount > 0 {
-		_ = data.UnLockTransaction(order.Network, order.ReceiveAddress, order.Token, order.ActualAmount)
+		_ = data.UnLockTransactionByTradeId(order.TradeId)
 	}
 	return c.SucJson(ctx, nil)
 }
@@ -342,6 +342,7 @@ func (c *BaseAdminController) ListOrdersWithSub(ctx echo.Context) error {
 	f := parseOrderFilter(ctx)
 	// Only parent orders at the top level; sub-orders appear nested inside sub_orders.
 	f.ParentOnly = true
+	f.IncludeSettledParents = true
 	rows, total, err := data.ListOrders(f)
 	if err != nil {
 		return c.FailJson(ctx, err)

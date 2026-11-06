@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -313,6 +314,8 @@ func TestBuildAptosLedgerRangesStopsAtQueueLimit(t *testing.T) {
 	}
 }
 
+var aptosPaymentTestVersion atomic.Int64
+
 func TestProcessAptosLedgerRoundMarksMatchingUSDTOrderPaid(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
@@ -321,8 +324,10 @@ func TestProcessAptosLedgerRoundMarksMatchingUSDTOrderPaid(t *testing.T) {
 	receive := wallets[0]
 	amount := 3.1
 	tradeID := "aptos_trade_1"
+	// Each run represents a new transfer, including under go test -count.
+	// The real service's transfer deduplication cache outlives the test DB.
+	version := 1000 + aptosPaymentTestVersion.Add(1)
 	usdt := "0x357b0b74bc833e95a115ad22604854d6b0fca151cecd94111770e5d6ffc9dc2b"
-	body := aptosFungibleTransferBody(t, "0xabc", 101, receive, usdt, "3100000")
 
 	order := &mdb.Orders{
 		TradeId:         tradeID,
@@ -343,15 +348,19 @@ func TestProcessAptosLedgerRoundMarksMatchingUSDTOrderPaid(t *testing.T) {
 	if err := data.LockTransaction(mdb.NetworkAptos, receive, "USDT", tradeID, amount, time.Hour); err != nil {
 		t.Fatalf("lock transaction: %v", err)
 	}
+	// The transfer must occur after order creation, just like a real payment.
+	// Generating it earlier can cross a millisecond boundary and correctly
+	// trigger the production rejection of payments predating the order.
+	body := aptosFungibleTransferBody(t, "0xabc", version, receive, usdt, "3100000")
 
 	state, err := loadMoveWatchState(mdb.NetworkAptos)
 	if err != nil {
 		t.Fatalf("load state: %v", err)
 	}
-	provider := &fakeAptosProvider{bodiesByStart: map[int64][]byte{101: body}}
-	cursor := &aptosRuntimeCursor{initialized: true, lastSeenVersion: 100}
+	provider := &fakeAptosProvider{bodiesByStart: map[int64][]byte{version: body}}
+	cursor := &aptosRuntimeCursor{initialized: true, lastSeenVersion: version - 1}
 
-	if _, err = processAptosLedgerRound(context.Background(), provider, state, cursor, 101); err != nil {
+	if _, err = processAptosLedgerRound(context.Background(), provider, state, cursor, version); err != nil {
 		t.Fatalf("processAptosLedgerRound(): %v", err)
 	}
 	paid, err := data.GetOrderInfoByTradeId(tradeID)

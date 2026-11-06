@@ -107,7 +107,11 @@ func HttpServerStart() {
 
 func MiddlewareRegister(e *echo.Echo) {
 	if config.HTTPAccessLog {
-		e.Use(echoMiddleware.Logger())
+		// Legacy EPay GET queries carry a merchant key in the query string.
+		// Log the path only; never persist credentials via the default URI field.
+		e.Use(echoMiddleware.LoggerWithConfig(echoMiddleware.LoggerConfig{
+			Format: "${time_rfc3339} ${method} ${path} ${status} ${latency_human}\n",
+		}))
 	}
 	e.Use(middleware.RequestUUID())
 }

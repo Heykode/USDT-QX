@@ -6,3 +6,19 @@ src/*.db-shm
 src/*.db-wal
 .DS_Store
 .env
+
+# Private deployment data and local build output
+/conf/
+/runtime/
+/logs/
+/dist/
+/src/conf/
+/src/logs/
+/src/dist/
+/src/www-release/
+.env.*
+!.env.example
+!src/.env.example
+*.db
+*.db-wal
+*.db-shm

@@ -2,6 +2,7 @@ package mq
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,23 @@ import (
 	"github.com/GMWalletApp/epusdt/model/mdb"
 	"github.com/GMWalletApp/epusdt/util/sign"
 )
+
+func TestCleanupExpiredTransactionLocksRetriesSQLiteBusy(t *testing.T) {
+	attempts := 0
+	err := cleanupExpiredTransactionLocksWith(func() error {
+		attempts++
+		if attempts < sqliteBusyRetryAttempts {
+			return errors.New("database is locked (SQLITE_BUSY)")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("cleanup retry: %v", err)
+	}
+	if attempts != sqliteBusyRetryAttempts {
+		t.Fatalf("attempts = %d, want %d", attempts, sqliteBusyRetryAttempts)
+	}
+}
 
 func TestProcessExpiredOrdersExpiresWaitingOrdersAndReleasesLocks(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
@@ -159,6 +177,8 @@ func TestProcessExpiredOrdersKeepsPaidOrdersPaid(t *testing.T) {
 func TestDispatchPendingCallbacksHonorsBackoffAndPersistsSuccess(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
+	// Persisted callback state is visible before worker cleanup completes.
+	defer callbackWorkers.Wait()
 
 	callbackLimiter = make(chan struct{}, 1)
 	callbackInflight = sync.Map{}
@@ -216,6 +236,8 @@ func TestDispatchPendingCallbacksHonorsBackoffAndPersistsSuccess(t *testing.T) {
 func TestDispatchPendingCallbacksResumesRetryAfterRestart(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
+	// Persisted callback state is visible before worker cleanup completes.
+	defer callbackWorkers.Wait()
 
 	callbackLimiter = make(chan struct{}, 1)
 	callbackInflight = sync.Map{}
@@ -264,6 +286,8 @@ func TestDispatchPendingCallbacksResumesRetryAfterRestart(t *testing.T) {
 		t.Fatalf("first callback request count = %d, want 1", got)
 	}
 
+	// Finish the old worker before simulating a process restart.
+	callbackWorkers.Wait()
 	callbackLimiter = make(chan struct{}, 1)
 	callbackInflight = sync.Map{}
 
@@ -289,6 +313,8 @@ func TestDispatchPendingCallbacksResumesRetryAfterRestart(t *testing.T) {
 func TestDispatchPendingCallbacksEpayRequiresAck(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
+	// Persisted callback state is visible before worker cleanup completes.
+	defer callbackWorkers.Wait()
 
 	callbackLimiter = make(chan struct{}, 1)
 	callbackInflight = sync.Map{}
@@ -343,6 +369,8 @@ func TestDispatchPendingCallbacksEpayRequiresAck(t *testing.T) {
 func TestDispatchPendingCallbacksEpayAcceptsTrimmedOk(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
+	// Persisted callback state is visible before worker cleanup completes.
+	defer callbackWorkers.Wait()
 
 	callbackLimiter = make(chan struct{}, 1)
 	callbackInflight = sync.Map{}
@@ -711,6 +739,8 @@ func TestSendOrderCallbackEpayPreservesStoredAlipayType(t *testing.T) {
 func TestDispatchPendingCallbacksEpayAcceptsSuccessAck(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
+	// Persisted callback state is visible before worker cleanup completes.
+	defer callbackWorkers.Wait()
 
 	callbackLimiter = make(chan struct{}, 1)
 	callbackInflight = sync.Map{}

@@ -19,6 +19,7 @@ import (
 	"github.com/GMWalletApp/epusdt/model/data"
 	"github.com/GMWalletApp/epusdt/model/mdb"
 	"github.com/GMWalletApp/epusdt/model/service"
+	"github.com/GMWalletApp/epusdt/telegram"
 	"github.com/GMWalletApp/epusdt/util/constant"
 	"github.com/GMWalletApp/epusdt/util/http_client"
 	"github.com/GMWalletApp/epusdt/util/log"
@@ -94,6 +95,7 @@ func setupTestEnv(t *testing.T) *echo.Echo {
 	config.RateCacheSave = data.SaveRateCacheSnapshot
 	config.ResetRateCacheRuntime()
 	t.Cleanup(func() {
+		telegram.WaitForReloads()
 		config.SettingsGetString = nil
 		config.RateCacheLoad = nil
 		config.RateCacheLoadAll = nil
@@ -277,6 +279,63 @@ func TestRootPostRoute(t *testing.T) {
 	}
 	if body := rec.Body.String(); body != "hello epusdt, https://github.com/GMwalletApp/epusdt" {
 		t.Fatalf("unexpected body: %q", body)
+	}
+}
+
+func TestEPayOrderQueryReturnsNativeResponseByTradeOrMerchantOrder(t *testing.T) {
+	e := setupTestEnv(t)
+	apiKey, err := data.GetEnabledApiKey("1")
+	if err != nil || apiKey == nil || apiKey.ID == 0 {
+		t.Fatalf("load epay api key: %v", err)
+	}
+	if err := dao.Mdb.Create(&mdb.Orders{
+		TradeId: "epay-query-trade-001", OrderId: "epay-query-out-001", Amount: 12.5,
+		Currency: "cny", Status: mdb.StatusPaySuccess, Name: "VIP会员", EpayType: "alipay",
+		PaymentType: mdb.PaymentTypeEpay, ApiKeyID: apiKey.ID,
+	}).Error; err != nil {
+		t.Fatalf("create query fixture: %v", err)
+	}
+	for _, path := range []string{"/api.php", "/payments/epay/v1/order/create-transaction/api.php"} {
+		for _, identifier := range []string{"trade_no", "out_trade_no"} {
+			values := url.Values{"act": {"order"}, "pid": {"1"}, "key": {testAPIToken}}
+			if identifier == "trade_no" {
+				values.Set(identifier, "epay-query-trade-001")
+			} else {
+				values.Set(identifier, "epay-query-out-001")
+			}
+			req := httptest.NewRequest(http.MethodGet, path+"?"+values.Encode(), nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if resp := parseResp(t, rec); resp["code"] != float64(1) || resp["trade_no"] != "epay-query-trade-001" || resp["out_trade_no"] != "epay-query-out-001" || resp["money"] != "12.50" || resp["status"] != float64(1) {
+				t.Fatalf("query %s by %s response = %v", path, identifier, resp)
+			}
+		}
+	}
+}
+
+func TestEPayOrderQueryRejectsInvalidKeyAndCrossMerchantOrder(t *testing.T) {
+	e := setupTestEnv(t)
+	other := &mdb.ApiKey{Name: "other", Pid: "2", SecretKey: "other-secret", Status: mdb.ApiKeyStatusEnable}
+	if err := dao.Mdb.Create(other).Error; err != nil {
+		t.Fatalf("create other api key: %v", err)
+	}
+	if err := dao.Mdb.Create(&mdb.Orders{TradeId: "epay-query-other-001", OrderId: "epay-query-other-out-001", Amount: 1, Status: mdb.StatusWaitPay, PaymentType: mdb.PaymentTypeEpay, ApiKeyID: other.ID}).Error; err != nil {
+		t.Fatalf("create other order: %v", err)
+	}
+	for _, key := range []string{"wrong-secret", testAPIToken} {
+		values := url.Values{"act": {"order"}, "pid": {"1"}, "key": {key}, "trade_no": {"epay-query-other-001"}}
+		req := httptest.NewRequest(http.MethodGet, "/api.php?"+values.Encode(), nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if resp := parseResp(t, rec); resp["code"] != float64(0) {
+			t.Fatalf("key %q queried another merchant order: %v", key, resp)
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api.php?act=order&pid=1&key="+testAPIToken, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if resp := parseResp(t, rec); resp["code"] != float64(0) {
+		t.Fatalf("missing order identifier response = %v", resp)
 	}
 }
 

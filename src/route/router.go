@@ -73,6 +73,10 @@ func RegisterRoute(e *echo.Echo) {
 	payRoute.POST("/submit-tx-hash/:trade_id", comm.Ctrl.SubmitTxHash)
 	payRoute.POST("/switch-network", comm.Ctrl.SwitchNetwork)
 
+	// Legacy EPay API compatibility endpoint. Unlike the newer GMPay/EPay
+	// routes, this endpoint returns the native EPay response shape.
+	e.Match([]string{http.MethodGet, http.MethodPost}, "/api.php", comm.Ctrl.QueryEPayOrder)
+
 	// payment routes
 	paymentRoute := e.Group("/payments")
 
@@ -95,6 +99,10 @@ func RegisterRoute(e *echo.Echo) {
 	// removed — the default seeded api_key is always available, and
 	// having two sources of truth led to inbound/outbound sig mismatch.
 	epayV1 := paymentRoute.Group("/epay/v1")
+	// Sub2API derives its query URL from the configured EPay create endpoint,
+	// which can produce this legacy-compatible path. Keep it as an alias of
+	// the native query endpoint so existing integrations resolve paid orders.
+	epayV1.Match([]string{http.MethodPost, http.MethodGet}, "/order/create-transaction/api.php", comm.Ctrl.QueryEPayOrder)
 	epayV1.Match([]string{http.MethodPost, http.MethodGet}, "/order/create-transaction/submit.php", func(ctx echo.Context) error {
 		params := make(map[string]interface{})
 		copyParams := func(values map[string][]string) {

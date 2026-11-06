@@ -1,0 +1,46 @@
+name: QX validation
+
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qx-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: src
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.1'
+          cache-dependency-path: src/go.sum
+      - name: Test pure Go SQLite production path
+        env:
+          CGO_ENABLED: '0'
+        run: go test -count=1 ./...
+      - name: Detect data races
+        run: go test -race -count=1 ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build Linux binaries
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+        run: |
+          mkdir -p ../dist
+          for arch in amd64 arm64; do
+            GOARCH="$arch" go build -trimpath -ldflags="-s -w -X github.com/GMWalletApp/epusdt/config.BuildVersion=2.0.0-qx.1-dev -X github.com/GMWalletApp/epusdt/config.BuildCommit=${GITHUB_SHA}" -o "../dist/usdt-qx-linux-$arch" .
+          done

@@ -10,6 +10,7 @@ var (
 	startOnce        sync.Once
 	callbackLimiter  chan struct{}
 	callbackInflight sync.Map
+	callbackWorkers  sync.WaitGroup
 )
 
 func Start() {

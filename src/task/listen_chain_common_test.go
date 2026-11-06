@@ -11,6 +11,7 @@ import (
 	"github.com/GMWalletApp/epusdt/model/mdb"
 	epLog "github.com/GMWalletApp/epusdt/util/log"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/rpc"
 	"go.uber.org/zap"
 )
 
@@ -172,6 +173,25 @@ func TestEvmHeaderBlockHeightRecordsRuntimeHeight(t *testing.T) {
 	polygon := stats[mdb.NetworkPolygon]
 	if polygon.LatestBlockHeight != 7654321 {
 		t.Fatalf("polygon latest_block_height = %d, want 7654321", polygon.LatestBlockHeight)
+	}
+}
+
+func TestEvmLiveFilterQueryStartsAtLatest(t *testing.T) {
+	query := evmLiveFilterQuery(nil, nil)
+	if query.FromBlock == nil || !query.FromBlock.IsInt64() {
+		t.Fatalf("FromBlock = %v, want latest", query.FromBlock)
+	}
+	if got := query.FromBlock.Int64(); got != int64(rpc.LatestBlockNumber) {
+		t.Fatalf("FromBlock = %d, want %d (latest)", got, rpc.LatestBlockNumber)
+	}
+}
+
+func TestEvmBackfillBatchSize(t *testing.T) {
+	if got := evmBackfillBatchSize(mdb.NetworkBsc); got != 50 {
+		t.Fatalf("BSC backfill batch size = %d, want 50", got)
+	}
+	if got := evmBackfillBatchSize(mdb.NetworkEthereum); got != evmBackfillBatchBlocks {
+		t.Fatalf("Ethereum backfill batch size = %d, want %d", got, evmBackfillBatchBlocks)
 	}
 }
 
