@@ -20,6 +20,8 @@ type RateCacheSnapshot struct {
 	Base          string             `json:"base"`
 	Rates         map[string]float64 `json:"rates"`
 	SourceURL     string             `json:"source_url"`
+	QuoteDate     string             `json:"quote_date,omitempty"`
+	ExpiresAt     *time.Time         `json:"expires_at,omitempty"`
 	LastSuccessAt *time.Time         `json:"last_success_at,omitempty"`
 	LastAttemptAt *time.Time         `json:"last_attempt_at,omitempty"`
 	LastRefreshOK bool               `json:"last_refresh_ok"`

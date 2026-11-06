@@ -362,6 +362,14 @@ func TestCreateTransactionFailsWhenRateAPIUnavailableAndForcedSettingIsNotPositi
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
 	t.Setenv("API_RATE_URL", "")
+	// Empty configuration now resolves to the default provider. Simulate
+	// its outage explicitly instead of allowing this test to access the web.
+	installMockHTTPClient(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != config.DefaultRateAPIURL+"/cny.json" {
+			t.Fatalf("unexpected default rate source: %s", r.URL)
+		}
+		return nil, fmt.Errorf("rate provider unavailable")
+	})
 
 	if err := data.SetSetting("rate", "rate.forced_rate_list", `{"cny":{"usdt":0}}`, "json"); err != nil {
 		t.Fatalf("set rate.forced_rate_list: %v", err)

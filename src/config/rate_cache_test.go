@@ -49,6 +49,7 @@ func installRateCacheStore(t *testing.T, initial ...RateCacheSnapshot) *testRate
 	}
 	ResetRateCacheRuntime()
 	t.Cleanup(func() {
+		rateAsyncRefreshes.Wait()
 		RateCacheLoad, RateCacheLoadAll, RateCacheSave = oldLoad, oldLoadAll, oldSave
 		ResetRateCacheRuntime()
 	})
@@ -99,10 +100,10 @@ func TestAutoRatePersistsFullBasePayloadAcrossRuntimeReset(t *testing.T) {
 }
 
 func TestAutoRateReturnsStaleCacheWhileAsyncRefreshFails(t *testing.T) {
-	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	oldNow := rateNow
 	rateNow = func() time.Time { return now }
-	t.Cleanup(func() { rateNow = oldNow })
+	t.Cleanup(func() { rateAsyncRefreshes.Wait(); rateNow = oldNow })
 	installSettingsGetter(t, map[string]string{
 		"rate.mode":              RateModeAuto,
 		"rate.api_url":           "https://rate.example.test",
@@ -112,6 +113,8 @@ func TestAutoRateReturnsStaleCacheWhileAsyncRefreshFails(t *testing.T) {
 	lastAttempt := lastSuccess
 	store := installRateCacheStore(t, RateCacheSnapshot{
 		Base:          "cny",
+		SourceURL:     "https://rate.example.test",
+		ExpiresAt:     timePointer(now.Add(time.Hour)),
 		Rates:         map[string]float64{"usdt": 0.14},
 		LastSuccessAt: &lastSuccess,
 		LastAttemptAt: &lastAttempt,
@@ -165,7 +168,7 @@ func TestAutoRateReturnsStaleCacheWhileAsyncRefreshFails(t *testing.T) {
 }
 
 func TestForcedRefreshRejectsAmbiguousPayloadAndPreservesCache(t *testing.T) {
-	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	oldSuccess := now.Add(-time.Hour)
 	installSettingsGetter(t, map[string]string{
 		"rate.mode":    RateModeAuto,
@@ -173,6 +176,8 @@ func TestForcedRefreshRejectsAmbiguousPayloadAndPreservesCache(t *testing.T) {
 	})
 	store := installRateCacheStore(t, RateCacheSnapshot{
 		Base:          "cny",
+		SourceURL:     "https://rate.example.test",
+		ExpiresAt:     timePointer(now.Add(time.Hour)),
 		Rates:         map[string]float64{"usdt": 0.14},
 		LastSuccessAt: &oldSuccess,
 		LastRefreshOK: true,
@@ -200,10 +205,10 @@ func TestForcedRefreshRejectsAmbiguousPayloadAndPreservesCache(t *testing.T) {
 }
 
 func TestAutoRateAsyncRefreshUpdatesStaleCache(t *testing.T) {
-	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	oldNow := rateNow
 	rateNow = func() time.Time { return now }
-	t.Cleanup(func() { rateNow = oldNow })
+	t.Cleanup(func() { rateAsyncRefreshes.Wait(); rateNow = oldNow })
 	installSettingsGetter(t, map[string]string{
 		"rate.mode":              RateModeAuto,
 		"rate.api_url":           "https://rate.example.test",
@@ -212,6 +217,8 @@ func TestAutoRateAsyncRefreshUpdatesStaleCache(t *testing.T) {
 	oldSuccess := now.Add(-time.Minute)
 	store := installRateCacheStore(t, RateCacheSnapshot{
 		Base:          "cny",
+		SourceURL:     "https://rate.example.test",
+		ExpiresAt:     timePointer(now.Add(time.Hour)),
 		Rates:         map[string]float64{"usdt": 0.14},
 		LastSuccessAt: &oldSuccess,
 		LastAttemptAt: &oldSuccess,
@@ -249,10 +256,10 @@ func TestAutoRateAsyncRefreshUpdatesStaleCache(t *testing.T) {
 }
 
 func TestAutoRatePartialPayloadPreservesRequiredCoinFallback(t *testing.T) {
-	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	oldNow := rateNow
 	rateNow = func() time.Time { return now }
-	t.Cleanup(func() { rateNow = oldNow })
+	t.Cleanup(func() { rateAsyncRefreshes.Wait(); rateNow = oldNow })
 	installSettingsGetter(t, map[string]string{
 		"rate.mode":              RateModeAuto,
 		"rate.api_url":           "https://rate.example.test",
@@ -261,6 +268,8 @@ func TestAutoRatePartialPayloadPreservesRequiredCoinFallback(t *testing.T) {
 	oldSuccess := now.Add(-time.Minute)
 	store := installRateCacheStore(t, RateCacheSnapshot{
 		Base:          "cny",
+		SourceURL:     "https://rate.example.test",
+		ExpiresAt:     timePointer(now.Add(time.Hour)),
 		Rates:         map[string]float64{"usdt": 0.14},
 		LastSuccessAt: &oldSuccess,
 		LastAttemptAt: &oldSuccess,
@@ -303,11 +312,13 @@ func TestAutoRatePartialPayloadPreservesRequiredCoinFallback(t *testing.T) {
 	}
 }
 
-func TestManualPartialRefreshMergesPreviouslySuccessfulCoins(t *testing.T) {
-	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+func TestManualPartialRefreshDoesNotRenewMissingCoins(t *testing.T) {
+	now := time.Now().UTC()
 	oldSuccess := now.Add(-time.Minute)
 	store := installRateCacheStore(t, RateCacheSnapshot{
 		Base:          "cny",
+		SourceURL:     "https://rate.example.test",
+		ExpiresAt:     timePointer(now.Add(time.Hour)),
 		Rates:         map[string]float64{"usdt": 0.14, "trx": 1.8},
 		LastSuccessAt: &oldSuccess,
 		LastAttemptAt: &oldSuccess,
@@ -328,24 +339,30 @@ func TestManualPartialRefreshMergesPreviouslySuccessfulCoins(t *testing.T) {
 	})
 
 	result := RefreshRateBase("cny", true)
-	if !result.OK || result.Rates["usdt"] != 0.15 || result.Rates["trx"] != 1.8 {
+	if !result.OK || result.Rates["usdt"] != 0.15 || result.Rates["trx"] != 0 {
 		t.Fatalf("partial manual refresh result = %#v", result)
 	}
 	store.mu.Lock()
 	stored := cloneSnapshot(store.rows["cny"])
 	store.mu.Unlock()
-	if stored.Rates["usdt"] != 0.15 || stored.Rates["trx"] != 1.8 {
-		t.Fatalf("merged persisted rates = %#v", stored.Rates)
+	if stored.Rates["usdt"] != 0.15 || stored.Rates["trx"] != 0 {
+		t.Fatalf("replacement persisted rates = %#v", stored.Rates)
+	}
+	ResetRateCacheRuntime()
+	if got := GetRateForCoin("trx", "cny"); got != 0 {
+		t.Fatalf("missing coin survived full payload replacement: %v", got)
 	}
 }
 
 func TestSuccessfulFetchIsNotPublishedWhenPersistenceFails(t *testing.T) {
-	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	oldSuccess := now.Add(-time.Minute)
 	oldLoad, oldLoadAll, oldSave := RateCacheLoad, RateCacheLoadAll, RateCacheSave
 	RateCacheLoad = func(base string) (RateCacheSnapshot, error) {
 		return RateCacheSnapshot{
 			Base:          base,
+			SourceURL:     "https://rate.example.test",
+			ExpiresAt:     timePointer(now.Add(time.Hour)),
 			Rates:         map[string]float64{"usdt": 0.14},
 			LastSuccessAt: &oldSuccess,
 			LastAttemptAt: &oldSuccess,
@@ -356,6 +373,7 @@ func TestSuccessfulFetchIsNotPublishedWhenPersistenceFails(t *testing.T) {
 	RateCacheSave = func(RateCacheSnapshot) error { return errors.New("database unavailable") }
 	ResetRateCacheRuntime()
 	t.Cleanup(func() {
+		rateAsyncRefreshes.Wait()
 		RateCacheLoad, RateCacheLoadAll, RateCacheSave = oldLoad, oldLoadAll, oldSave
 		ResetRateCacheRuntime()
 	})
@@ -386,10 +404,12 @@ func TestSuccessfulFetchIsNotPublishedWhenPersistenceFails(t *testing.T) {
 }
 
 func TestStatusLoadDoesNotOverwriteNewerMemorySnapshot(t *testing.T) {
-	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	oldAttempt := now.Add(-time.Minute)
 	oldSnapshot := RateCacheSnapshot{
 		Base:          "cny",
+		SourceURL:     "https://rate.example.test",
+		ExpiresAt:     timePointer(now.Add(time.Hour)),
 		Rates:         map[string]float64{"usdt": 0.14},
 		LastSuccessAt: &oldAttempt,
 		LastAttemptAt: &oldAttempt,
@@ -397,6 +417,8 @@ func TestStatusLoadDoesNotOverwriteNewerMemorySnapshot(t *testing.T) {
 	}
 	newSnapshot := RateCacheSnapshot{
 		Base:          "cny",
+		SourceURL:     "https://rate.example.test",
+		ExpiresAt:     timePointer(now.Add(time.Hour)),
 		Rates:         map[string]float64{"usdt": 0.15},
 		LastSuccessAt: &now,
 		LastAttemptAt: &now,
@@ -415,6 +437,7 @@ func TestStatusLoadDoesNotOverwriteNewerMemorySnapshot(t *testing.T) {
 	RateCacheSave = func(RateCacheSnapshot) error { return nil }
 	ResetRateCacheRuntime()
 	t.Cleanup(func() {
+		rateAsyncRefreshes.Wait()
 		RateCacheLoad, RateCacheLoadAll, RateCacheSave = oldLoad, oldLoadAll, oldSave
 		ResetRateCacheRuntime()
 	})

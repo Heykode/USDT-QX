@@ -25,6 +25,7 @@ func installSettingsGetter(t *testing.T, values map[string]string) {
 		return values[key]
 	}
 	t.Cleanup(func() {
+		rateAsyncRefreshes.Wait()
 		SettingsGetString = oldGetter
 		ResetRateCacheRuntime()
 	})
@@ -46,6 +47,7 @@ func installMockHTTPClient(t *testing.T, handler roundTripFunc) {
 		return client
 	}
 	t.Cleanup(func() {
+		rateAsyncRefreshes.Wait()
 		http_client.ClientFactory = oldFactory
 	})
 }
