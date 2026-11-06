@@ -1,3 +1,19 @@
+# USDT-QX
+
+基于官方 `GMWalletApp/epusdt v2.0.0` 的 QX 私有维护版本。保留官方历史、GPL-3.0 许可证、Go 模块路径和 EPay/GMPay 接口，以便持续比较上游差异。
+
+- 基线：`619cecb11d6bbd1dcdd1b698ee08b37fc722d3e3`（`v2.0.0`）。
+- 当前维护版本：`2.0.0-qx.1-dev`。通过代码验证不等于已经完成生产收款验收。
+- [补丁来源、取舍与验证记录](docs/maintenance-review.md)
+- [自动／固定汇率说明](docs/exchange-rates.md)
+- 构建测试：在 `src/` 执行 `go test ./...`、`go test -race ./...`、`go vet ./...`。
+- GitHub Actions 只运行测试和编译，不发布镜像、不部署服务器。旧工作流可从 `v2.0.0` 基线恢复。
+- 生产配置、数据库、钱包和商户密钥不进入仓库。部署需单独验收并备份数据库及配置；原官方镜像继续作为回滚基线。
+
+---
+
+以下保留上游说明，涉及上游发行版的内容不代表 QX 维护版已完成对应验收。
+
 # Epusdt — Easy Payment USDT
 
 <p align="center">
