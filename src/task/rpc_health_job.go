@@ -45,9 +45,10 @@ func (r RpcHealthJob) Run() {
 		wg.Add(1)
 		go func(n mdb.RpcNode) {
 			defer wg.Done()
-			status, latency, probeErr := probeRpcNode(n)
+			status, latency, _ := probeRpcNode(n)
 			if status == mdb.RpcNodeStatusDown && n.Status != mdb.RpcNodeStatusDown {
-				log.Sugar.Errorf("[rpc-health] capability probe failed node=%s err=%v", data.RpcNodeLogLabel(n), probeErr)
+				// HTTP client errors can contain the full URL, including RPC keys.
+				log.Sugar.Errorf("[rpc-health] capability probe failed node=%s", data.RpcNodeLogLabel(n))
 			}
 			if err := data.UpdateRpcNodeHealth(n.ID, status, latency); err != nil {
 				log.Sugar.Warnf("[rpc-health] update node %d err=%v", n.ID, err)

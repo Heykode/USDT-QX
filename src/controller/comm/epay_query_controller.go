@@ -16,19 +16,19 @@ import (
 // /api.php?act=order protocol. It deliberately does not use the project's
 // standard status_code/data envelope.
 type epayOrderQueryResponse struct {
-	Code        int    `json:"code"`
-	Msg         string `json:"msg"`
-	TradeNo     string `json:"trade_no,omitempty"`
-	OutTradeNo  string `json:"out_trade_no,omitempty"`
-	Type        string `json:"type,omitempty"`
-	Pid         string `json:"pid,omitempty"`
-	AddTime     string `json:"addtime,omitempty"`
-	EndTime     string `json:"endtime"`
-	Name        string `json:"name,omitempty"`
-	Money       string `json:"money,omitempty"`
-	Status      int    `json:"status"`
-	Param       string `json:"param"`
-	Buyer       string `json:"buyer"`
+	Code       int    `json:"code"`
+	Msg        string `json:"msg"`
+	TradeNo    string `json:"trade_no,omitempty"`
+	OutTradeNo string `json:"out_trade_no,omitempty"`
+	Type       string `json:"type,omitempty"`
+	Pid        string `json:"pid,omitempty"`
+	AddTime    string `json:"addtime,omitempty"`
+	EndTime    string `json:"endtime"`
+	Name       string `json:"name,omitempty"`
+	Money      string `json:"money,omitempty"`
+	Status     int    `json:"status"`
+	Param      string `json:"param"`
+	Buyer      string `json:"buyer"`
 }
 
 // QueryEPayOrder implements the traditional EPay order query endpoint:
@@ -38,6 +38,8 @@ type epayOrderQueryResponse struct {
 // required by the EPay protocol. The order must also belong to that merchant
 // API key, so a valid key cannot query another merchant's order.
 func (c *BaseCommController) QueryEPayOrder(ctx echo.Context) error {
+	ctx.Response().Header().Set("Cache-Control", "no-store")
+	ctx.Response().Header().Set("Pragma", "no-cache")
 	param := func(name string) string {
 		value := ctx.QueryParam(name)
 		if value == "" && ctx.Request().Method == http.MethodPost {
@@ -73,6 +75,9 @@ func (c *BaseCommController) QueryEPayOrder(ctx echo.Context) error {
 		order, err = data.GetOrderInfoByOrderId(outTradeNo)
 	}
 	if err != nil || order == nil || order.ID == 0 || order.ApiKeyID != apiKey.ID {
+		return ctx.JSON(http.StatusOK, epayOrderQueryResponse{Code: 0, Msg: "订单不存在！"})
+	}
+	if outTradeNo != "" && order.OrderId != outTradeNo {
 		return ctx.JSON(http.StatusOK, epayOrderQueryResponse{Code: 0, Msg: "订单不存在！"})
 	}
 

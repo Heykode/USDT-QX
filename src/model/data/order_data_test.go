@@ -115,11 +115,11 @@ func TestSettlementStatsCountChildOnlyWhenParentPaidBySubOrder(t *testing.T) {
 		t.Fatalf("create child: %v", err)
 	}
 	parent := &mdb.Orders{
-		TradeId:       "trade-settlement-parent",
-		OrderId:       "order-settlement-parent",
-		Amount:        100,
-		Currency:      "CNY",
-		Status:        mdb.StatusPaySuccess,
+		TradeId:         "trade-settlement-parent",
+		OrderId:         "order-settlement-parent",
+		Amount:          100,
+		Currency:        "CNY",
+		Status:          mdb.StatusPaySuccess,
 		PayBySubId:      child.ID,
 		CallbackNum:     0,
 		CallBackConfirm: mdb.CallBackConfirmNo,

@@ -296,7 +296,11 @@ func TestEPayOrderQueryReturnsNativeResponseByTradeOrMerchantOrder(t *testing.T)
 	for _, path := range []string{"/api.php", "/payments/epay/v1/order/create-transaction/api.php"} {
 		for _, identifier := range []string{"trade_no", "out_trade_no"} {
 			values := url.Values{"act": {"order"}, "pid": {"1"}, "key": {testAPIToken}}
-			if identifier == "trade_no" { values.Set(identifier, "epay-query-trade-001") } else { values.Set(identifier, "epay-query-out-001") }
+			if identifier == "trade_no" {
+				values.Set(identifier, "epay-query-trade-001")
+			} else {
+				values.Set(identifier, "epay-query-out-001")
+			}
 			req := httptest.NewRequest(http.MethodGet, path+"?"+values.Encode(), nil)
 			rec := httptest.NewRecorder()
 			e.ServeHTTP(rec, req)
@@ -310,19 +314,27 @@ func TestEPayOrderQueryReturnsNativeResponseByTradeOrMerchantOrder(t *testing.T)
 func TestEPayOrderQueryRejectsInvalidKeyAndCrossMerchantOrder(t *testing.T) {
 	e := setupTestEnv(t)
 	other := &mdb.ApiKey{Name: "other", Pid: "2", SecretKey: "other-secret", Status: mdb.ApiKeyStatusEnable}
-	if err := dao.Mdb.Create(other).Error; err != nil { t.Fatalf("create other api key: %v", err) }
-	if err := dao.Mdb.Create(&mdb.Orders{TradeId: "epay-query-other-001", OrderId: "epay-query-other-out-001", Amount: 1, Status: mdb.StatusWaitPay, PaymentType: mdb.PaymentTypeEpay, ApiKeyID: other.ID}).Error; err != nil { t.Fatalf("create other order: %v", err) }
+	if err := dao.Mdb.Create(other).Error; err != nil {
+		t.Fatalf("create other api key: %v", err)
+	}
+	if err := dao.Mdb.Create(&mdb.Orders{TradeId: "epay-query-other-001", OrderId: "epay-query-other-out-001", Amount: 1, Status: mdb.StatusWaitPay, PaymentType: mdb.PaymentTypeEpay, ApiKeyID: other.ID}).Error; err != nil {
+		t.Fatalf("create other order: %v", err)
+	}
 	for _, key := range []string{"wrong-secret", testAPIToken} {
 		values := url.Values{"act": {"order"}, "pid": {"1"}, "key": {key}, "trade_no": {"epay-query-other-001"}}
 		req := httptest.NewRequest(http.MethodGet, "/api.php?"+values.Encode(), nil)
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, req)
-		if resp := parseResp(t, rec); resp["code"] != float64(0) { t.Fatalf("key %q queried another merchant order: %v", key, resp) }
+		if resp := parseResp(t, rec); resp["code"] != float64(0) {
+			t.Fatalf("key %q queried another merchant order: %v", key, resp)
+		}
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api.php?act=order&pid=1&key="+testAPIToken, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
-	if resp := parseResp(t, rec); resp["code"] != float64(0) { t.Fatalf("missing order identifier response = %v", resp) }
+	if resp := parseResp(t, rec); resp["code"] != float64(0) {
+		t.Fatalf("missing order identifier response = %v", resp)
+	}
 }
 
 // TestCreateOrderGmpayV1Solana tests the gmpay route with solana network.
