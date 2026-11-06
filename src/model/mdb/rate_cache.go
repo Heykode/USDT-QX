@@ -4,11 +4,14 @@ import "time"
 
 // RateCache stores the last successful external rate payload for one base
 // currency. Failed refreshes update only the attempt/result fields so the
-// last usable rates survive API outages and process restarts.
+// last usable rates survive API outages and process restarts until ExpiresAt.
+// Switching providers discards the previous provider's payload.
 type RateCache struct {
 	Base          string     `gorm:"column:base;primaryKey;size:16" json:"base"`
 	Rates         string     `gorm:"column:rates;type:text" json:"rates"`
 	SourceURL     string     `gorm:"column:source_url;type:text" json:"source_url"`
+	QuoteDate     string     `gorm:"column:quote_date;size:10" json:"quote_date,omitempty"`
+	ExpiresAt     *time.Time `gorm:"column:expires_at" json:"expires_at,omitempty"`
 	LastSuccessAt *time.Time `gorm:"column:last_success_at" json:"last_success_at,omitempty"`
 	LastAttemptAt *time.Time `gorm:"column:last_attempt_at" json:"last_attempt_at,omitempty"`
 	LastRefreshOK bool       `gorm:"column:last_refresh_ok;not null;default:false" json:"last_refresh_ok"`

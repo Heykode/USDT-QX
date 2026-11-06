@@ -1651,6 +1651,10 @@ func TestAdminSettings_RateRefreshAndStatusPreserveLastSuccess(t *testing.T) {
 	if len(bases) != 1 || bases[0].(map[string]interface{})["last_refresh_ok"] != true {
 		t.Fatalf("rate status bases = %v", bases)
 	}
+	baseStatus := bases[0].(map[string]interface{})
+	if baseStatus["is_usable"] != true || baseStatus["expires_at"] == nil || baseStatus["source_url"] != "https://rate.example.test" {
+		t.Fatalf("rate status missing validity/source metadata: %v", baseStatus)
+	}
 
 	failing = true
 	rec = doPostAdmin(e, "/admin/api/v1/settings/rate/refresh", map[string]interface{}{

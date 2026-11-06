@@ -93,6 +93,8 @@ func SetupTestDatabases(t testing.TB) func() {
 			Base:          snapshot.Base,
 			Rates:         string(rates),
 			SourceURL:     snapshot.SourceURL,
+			QuoteDate:     snapshot.QuoteDate,
+			ExpiresAt:     snapshot.ExpiresAt,
 			LastSuccessAt: snapshot.LastSuccessAt,
 			LastAttemptAt: snapshot.LastAttemptAt,
 			LastRefreshOK: snapshot.LastRefreshOK,
@@ -100,7 +102,7 @@ func SetupTestDatabases(t testing.TB) func() {
 		}
 		return dao.Mdb.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "base"}},
-			DoUpdates: clause.AssignmentColumns([]string{"rates", "source_url", "last_success_at", "last_attempt_at", "last_refresh_ok", "last_error", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"rates", "source_url", "quote_date", "expires_at", "last_success_at", "last_attempt_at", "last_refresh_ok", "last_error", "updated_at"}),
 		}).Create(&row).Error
 	}
 	config.ResetRateCacheRuntime()
@@ -164,6 +166,8 @@ func testRateCacheSnapshot(row mdb.RateCache) config.RateCacheSnapshot {
 		Base:          row.Base,
 		Rates:         rates,
 		SourceURL:     row.SourceURL,
+		QuoteDate:     row.QuoteDate,
+		ExpiresAt:     row.ExpiresAt,
 		LastSuccessAt: row.LastSuccessAt,
 		LastAttemptAt: row.LastAttemptAt,
 		LastRefreshOK: row.LastRefreshOK,

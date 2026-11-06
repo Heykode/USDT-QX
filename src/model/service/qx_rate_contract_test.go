@@ -1,11 +1,13 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GMWalletApp/epusdt/config"
 	"github.com/GMWalletApp/epusdt/internal/testutil"
@@ -26,7 +28,11 @@ func TestQXAutomaticRateUsesDiscountedAmountAndPreservesExistingOrder(t *testing
 		t.Fatal(err)
 	}
 	quote := 0.125 // 1 CNY = 0.125 USDT, or 1 USDT = 8 CNY.
+	offline := false
 	installMockHTTPClient(t, func(r *http.Request) (*http.Response, error) {
+		if offline {
+			return nil, errors.New("quote provider offline")
+		}
 		if r.URL.Host != "rates.example.test" || r.URL.Path != "/v1/currencies/cny.json" {
 			t.Fatalf("unexpected rate provider request: %s", r.URL)
 		}
@@ -49,6 +55,22 @@ func TestQXAutomaticRateUsesDiscountedAmountAndPreservesExistingOrder(t *testing
 	}
 	if second.ActualAmount != 18 {
 		t.Fatalf("new order amount = %v, want 18", second.ActualAmount)
+	}
+	// An unavailable provider and hard-expired cache must block new orders
+	// while the already reserved payment target remains intact.
+	snapshot, err := data.LoadRateCacheSnapshot("cny")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired := time.Now().Add(-time.Second)
+	snapshot.ExpiresAt = &expired
+	if err := data.SaveRateCacheSnapshot(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	offline = true
+	config.ResetRateCacheRuntime()
+	if order, err := CreateTransaction(newCreateTransactionRequest("qx-expired-quote", 90), nil); err == nil {
+		t.Fatalf("expired quote created order: %+v", order)
 	}
 	// Simulate a process cache reset and re-open the earlier checkout.
 	config.ResetRateCacheRuntime()

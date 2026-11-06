@@ -21,12 +21,18 @@ const (
 	DefaultRateCacheTTL    = 300
 	MinRateCacheTTLSeconds = 10
 	MaxRateCacheTTLSeconds = 86400
+	// This source publishes daily reference rates, not live exchange quotes.
+	DefaultRateAPIURL = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies"
+	MaxRateQuoteAge   = 48 * time.Hour
 )
 
 type RateRefreshResult struct {
 	Base          string             `json:"base" example:"cny"`
 	OK            bool               `json:"ok"`
 	Skipped       bool               `json:"skipped,omitempty"`
+	SourceURL     string             `json:"source_url"`
+	QuoteDate     string             `json:"quote_date,omitempty"`
+	ExpiresAt     *time.Time         `json:"expires_at,omitempty"`
 	Rates         map[string]float64 `json:"rates,omitempty"`
 	LastSuccessAt *time.Time         `json:"last_success_at,omitempty" example:"2026-07-22T10:00:00Z"`
 	LastAttemptAt *time.Time         `json:"last_attempt_at,omitempty" example:"2026-07-22T10:05:00Z"`
@@ -38,6 +44,9 @@ type RateBaseStatus struct {
 	Rates         map[string]float64 `json:"rates"`
 	SourceURL     string             `json:"source_url" example:"https://cdn.example.com/currencies/"`
 	IsStale       bool               `json:"is_stale"`
+	IsUsable      bool               `json:"is_usable"`
+	QuoteDate     string             `json:"quote_date,omitempty"`
+	ExpiresAt     *time.Time         `json:"expires_at,omitempty"`
 	LastSuccessAt *time.Time         `json:"last_success_at,omitempty" example:"2026-07-22T10:00:00Z"`
 	LastAttemptAt *time.Time         `json:"last_attempt_at,omitempty" example:"2026-07-22T10:05:00Z"`
 	LastRefreshOK bool               `json:"last_refresh_ok"`
@@ -52,10 +61,12 @@ type RateStatus struct {
 }
 
 var (
-	rateCacheMu     sync.RWMutex
-	rateCacheMemory = make(map[string]RateCacheSnapshot)
-	rateRefreshes   singleflight.Group
-	rateNow         = time.Now
+	rateCacheMu        sync.RWMutex
+	rateCacheMemory    = make(map[string]RateCacheSnapshot)
+	rateRefreshes      singleflight.Group
+	ratePublishMu      sync.Mutex
+	rateAsyncRefreshes sync.WaitGroup
+	rateNow            = time.Now
 )
 
 func GetRateMode() string {
@@ -98,22 +109,30 @@ func GetRateForCoin(coin string, base string) float64 {
 	snapshot, found := loadRateCacheSnapshot(base)
 	rate := rateFromSnapshot(snapshot, coin)
 	now := rateNow()
-	if found && rate > 0 {
+	if found && rate > 0 && isRateCacheUsable(snapshot, now) {
 		if isRateCacheStale(snapshot, now) && isRateRefreshDue(snapshot, now) {
+			rateAsyncRefreshes.Add(1)
 			go func() {
+				defer rateAsyncRefreshes.Done()
 				_ = refreshRateBaseForCoin(base, coin, false)
 			}()
 		}
-		return rate
+		if isRateCacheUsable(snapshot, rateNow()) {
+			return rate
+		}
+		return 0
 	}
 
 	// A successful, fresh full-base payload that does not contain the target
 	// coin is authoritative until its TTL expires.
-	if found && !isRateCacheStale(snapshot, now) {
+	if found && isRateCacheUsable(snapshot, now) && !isRateCacheStale(snapshot, now) {
 		return 0
 	}
 	_ = refreshRateBaseForCoin(base, coin, false)
 	snapshot, _ = loadRateCacheSnapshot(base)
+	if !isRateCacheUsable(snapshot, rateNow()) {
+		return 0
+	}
 	return rateFromSnapshot(snapshot, coin)
 }
 
@@ -136,24 +155,43 @@ func refreshRateBaseForCoin(base string, requiredCoin string, force bool) RateRe
 	if base == "" {
 		return RateRefreshResult{Base: base, Error: "base currency is empty"}
 	}
-	if !force {
+	source := GetRateApiUrl()
+	value, _, _ := rateRefreshes.Do(base+"\x00"+source, func() (interface{}, error) {
+		// Recheck after joining singleflight: another caller may have completed
+		// between our initial cache lookup and entering this function.
 		snapshot, _ := loadRateCacheSnapshot(base)
 		now := rateNow()
-		if !isRateCacheStale(snapshot, now) || !isRateRefreshDue(snapshot, now) {
-			return refreshResultFromSnapshot(snapshot, true)
+		if !force && normalizeRateSource(snapshot.SourceURL) == source {
+			if isRateCacheUsable(snapshot, now) && !isRateCacheStale(snapshot, now) {
+				return refreshResultFromSnapshot(snapshot, true), nil
+			}
+			// A hard expiry overrides the successful-cache refresh interval.
+			// Failed attempts remain throttled, including a failed cold start.
+			if !snapshot.LastRefreshOK && !isRateRefreshDue(snapshot, now) {
+				return refreshResultFromSnapshot(snapshot, true), nil
+			}
 		}
-	}
-	value, _, _ := rateRefreshes.Do(base, func() (interface{}, error) {
-		return refreshRateBase(base, requiredCoin), nil
+		return refreshRateBase(base, requiredCoin, source), nil
 	})
 	return value.(RateRefreshResult)
 }
 
-func refreshRateBase(base string, requiredCoin string) RateRefreshResult {
-	snapshot, _ := loadRateCacheSnapshot(base)
-	previous := cloneSnapshot(snapshot)
-	rates, sourceURL, err := fetchRatesForBase(base)
+func refreshRateBase(base string, requiredCoin string, source string) RateRefreshResult {
+	rates, quoteDate, expiresAt, err := fetchRatesForBase(base, source)
 	attemptedAt := rateNow()
+	// Serialize publication so an old in-flight source cannot overwrite a
+	// newly selected source after that source has already published its quote.
+	ratePublishMu.Lock()
+	defer ratePublishMu.Unlock()
+	if GetRateApiUrl() != source {
+		return RateRefreshResult{Base: base, SourceURL: source, Error: "rate source changed during refresh; response discarded"}
+	}
+	snapshot, _ := loadRateCacheSnapshot(base)
+	if normalizeRateSource(snapshot.SourceURL) != source {
+		// Never relabel the previous provider's rates as the new provider's.
+		snapshot = RateCacheSnapshot{Base: base, SourceURL: source}
+	}
+	previous := cloneSnapshot(snapshot)
 	snapshot.Base = base
 	snapshot.LastAttemptAt = timePointer(attemptedAt)
 	if err == nil && requiredCoin != "" && rateFromRates(rates, requiredCoin) <= 0 {
@@ -170,11 +208,12 @@ func refreshRateBase(base string, requiredCoin string) RateRefreshResult {
 		return refreshResultFromSnapshot(snapshot, false)
 	}
 
-	// A provider may temporarily return a partial payload. Keep previously
-	// successful coins that are absent from the new response so one incomplete
-	// refresh cannot make an otherwise usable payment asset unavailable.
-	snapshot.Rates = mergeRateMaps(rates, previous.Rates)
-	snapshot.SourceURL = sourceURL
+	// Only rates present in this payload receive its validity period. Merging
+	// missing coins would repeatedly renew potentially much older quotes.
+	snapshot.Rates = rates
+	snapshot.SourceURL = source
+	snapshot.QuoteDate = quoteDate
+	snapshot.ExpiresAt = expiresAt
 	snapshot.LastSuccessAt = timePointer(attemptedAt)
 	snapshot.LastRefreshOK = true
 	snapshot.LastError = ""
@@ -191,23 +230,23 @@ func refreshRateBase(base string, requiredCoin string) RateRefreshResult {
 	return refreshResultFromSnapshot(snapshot, false)
 }
 
-func fetchRatesForBase(base string) (map[string]float64, string, error) {
-	baseURL := strings.TrimSpace(GetRateApiUrl())
-	if baseURL == "" {
-		return nil, "", fmt.Errorf("rate api url is empty")
-	}
+func fetchRatesForBase(base string, baseURL string) (map[string]float64, string, *time.Time, error) {
 	requestURL := strings.TrimRight(baseURL, "/") + "/" + url.PathEscape(base) + ".json"
 	resp, err := http_client.GetHttpClient().R().Get(requestURL)
 	if err != nil {
-		return nil, baseURL, fmt.Errorf("call rate api: %w", err)
+		return nil, "", nil, fmt.Errorf("call rate api: %w", err)
 	}
 	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
-		return nil, baseURL, fmt.Errorf("call rate api unexpected status: %s", resp.Status())
+		return nil, "", nil, fmt.Errorf("call rate api unexpected status: %s", resp.Status())
 	}
 
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(resp.Body(), &payload); err != nil {
-		return nil, baseURL, fmt.Errorf("decode rate api response: %w", err)
+		return nil, "", nil, fmt.Errorf("decode rate api response: %w", err)
+	}
+	quoteDate, expiresAt, err := rateQuoteValidity(payload, baseURL, rateNow())
+	if err != nil {
+		return nil, "", nil, err
 	}
 	var rawBase json.RawMessage
 	for key, candidate := range payload {
@@ -215,16 +254,16 @@ func fetchRatesForBase(base string) (map[string]float64, string, error) {
 			continue
 		}
 		if rawBase != nil {
-			return nil, baseURL, fmt.Errorf("rate api response contains duplicate normalized base %s", base)
+			return nil, "", nil, fmt.Errorf("rate api response contains duplicate normalized base %s", base)
 		}
 		rawBase = candidate
 	}
 	if rawBase == nil {
-		return nil, baseURL, fmt.Errorf("rate api response has no %s object", base)
+		return nil, "", nil, fmt.Errorf("rate api response has no %s object", base)
 	}
 	var rawRates map[string]float64
 	if err := json.Unmarshal(rawBase, &rawRates); err != nil {
-		return nil, baseURL, fmt.Errorf("decode %s rate object: %w", base, err)
+		return nil, "", nil, fmt.Errorf("decode %s rate object: %w", base, err)
 	}
 	rates := make(map[string]float64, len(rawRates))
 	for coin, rate := range rawRates {
@@ -233,14 +272,42 @@ func fetchRatesForBase(base string) (map[string]float64, string, error) {
 			continue
 		}
 		if _, exists := rates[coin]; exists {
-			return nil, baseURL, fmt.Errorf("rate api response contains duplicate normalized coin %s.%s", base, coin)
+			return nil, "", nil, fmt.Errorf("rate api response contains duplicate normalized coin %s.%s", base, coin)
 		}
 		rates[coin] = rate
 	}
 	if len(rates) == 0 {
-		return nil, baseURL, fmt.Errorf("rate api response has no positive %s rates", base)
+		return nil, "", nil, fmt.Errorf("rate api response has no positive %s rates", base)
 	}
-	return rates, baseURL, nil
+	return rates, quoteDate, expiresAt, nil
+}
+
+func rateQuoteValidity(payload map[string]json.RawMessage, source string, now time.Time) (string, *time.Time, error) {
+	rawDate, hasDate := payload["date"]
+	if !hasDate {
+		if source == DefaultRateAPIURL {
+			return "", nil, fmt.Errorf("default rate source response is missing date")
+		}
+		// Legacy custom endpoints may omit date. In that case we can bound
+		// cache age only, not verify the provider's underlying quote age.
+		return "", timePointer(now.Add(MaxRateQuoteAge)), nil
+	}
+	var quoteDate string
+	if err := json.Unmarshal(rawDate, &quoteDate); err != nil {
+		return "", nil, fmt.Errorf("rate api date must be YYYY-MM-DD")
+	}
+	day, err := time.Parse(time.DateOnly, quoteDate)
+	if err != nil {
+		return "", nil, fmt.Errorf("rate api date must be YYYY-MM-DD")
+	}
+	if day.After(now.UTC()) {
+		return "", nil, fmt.Errorf("rate api date is in the future")
+	}
+	expiresAt := day.Add(MaxRateQuoteAge)
+	if !now.Before(expiresAt) {
+		return "", nil, fmt.Errorf("rate api quote is older than the 48-hour limit")
+	}
+	return quoteDate, &expiresAt, nil
 }
 
 func GetRateStatus() RateStatus {
@@ -253,6 +320,9 @@ func GetRateStatus() RateStatus {
 			Rates:         cloneRates(snapshot.Rates),
 			SourceURL:     snapshot.SourceURL,
 			IsStale:       isRateCacheStale(snapshot, now),
+			IsUsable:      isRateCacheUsable(snapshot, now),
+			QuoteDate:     snapshot.QuoteDate,
+			ExpiresAt:     snapshot.ExpiresAt,
 			LastSuccessAt: snapshot.LastSuccessAt,
 			LastAttemptAt: snapshot.LastAttemptAt,
 			LastRefreshOK: snapshot.LastRefreshOK,
@@ -400,14 +470,14 @@ func rateFromRates(rates map[string]float64, coin string) float64 {
 	return 0
 }
 
-func mergeRateMaps(primary, fallback map[string]float64) map[string]float64 {
-	merged := cloneRates(primary)
-	for coin, rate := range fallback {
-		if _, exists := merged[coin]; !exists && rate > 0 {
-			merged[coin] = rate
-		}
-	}
-	return merged
+func normalizeRateSource(source string) string {
+	return strings.TrimRight(strings.TrimSpace(source), "/")
+}
+
+func isRateCacheUsable(snapshot RateCacheSnapshot, now time.Time) bool {
+	return snapshot.LastSuccessAt != nil && !snapshot.LastSuccessAt.After(now) &&
+		snapshot.ExpiresAt != nil && now.Before(*snapshot.ExpiresAt) &&
+		len(snapshot.Rates) > 0 && normalizeRateSource(snapshot.SourceURL) == GetRateApiUrl()
 }
 
 func isSnapshotNewer(candidate, current RateCacheSnapshot) bool {
@@ -428,7 +498,7 @@ func latestSnapshotTime(snapshot RateCacheSnapshot) time.Time {
 }
 
 func isRateCacheStale(snapshot RateCacheSnapshot, now time.Time) bool {
-	if snapshot.LastSuccessAt == nil || len(snapshot.Rates) == 0 {
+	if !isRateCacheUsable(snapshot, now) {
 		return true
 	}
 	return !now.Before(snapshot.LastSuccessAt.Add(time.Duration(GetRateCacheTTLSeconds()) * time.Second))
@@ -446,6 +516,9 @@ func refreshResultFromSnapshot(snapshot RateCacheSnapshot, skipped bool) RateRef
 		Base:          snapshot.Base,
 		OK:            snapshot.LastRefreshOK,
 		Skipped:       skipped,
+		SourceURL:     snapshot.SourceURL,
+		QuoteDate:     snapshot.QuoteDate,
+		ExpiresAt:     snapshot.ExpiresAt,
 		Rates:         cloneRates(snapshot.Rates),
 		LastSuccessAt: snapshot.LastSuccessAt,
 		LastAttemptAt: snapshot.LastAttemptAt,

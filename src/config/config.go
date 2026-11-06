@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -315,10 +314,13 @@ func GetAppUri() string {
 func GetRateApiUrl() string {
 	// settings table wins (admin-configurable); .env and env var remain
 	// as fallbacks for smooth migration from the old layout.
-	if db := settingsRateApiUrl(); db != "" {
+	if db := normalizeRateSource(settingsRateApiUrl()); db != "" {
 		return db
 	}
-	return GetRateApiUrlFromEnv()
+	if env := normalizeRateSource(GetRateApiUrlFromEnv()); env != "" {
+		return env
+	}
+	return DefaultRateAPIURL
 }
 
 // GetRateApiUrlFromEnv returns the rate API URL read only from the
@@ -328,9 +330,6 @@ func GetRateApiUrlFromEnv() string {
 	rateURL := viper.GetString("api_rate_url")
 	if rateURL == "" {
 		rateURL = os.Getenv("API_RATE_URL")
-	}
-	if rateURL == "" {
-		log.Println("api_rate_url is empty")
 	}
 	return rateURL
 }
