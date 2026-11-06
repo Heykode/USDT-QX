@@ -177,6 +177,8 @@ func TestProcessExpiredOrdersKeepsPaidOrdersPaid(t *testing.T) {
 func TestDispatchPendingCallbacksHonorsBackoffAndPersistsSuccess(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
+	// Persisted callback state is visible before worker cleanup completes.
+	defer callbackWorkers.Wait()
 
 	callbackLimiter = make(chan struct{}, 1)
 	callbackInflight = sync.Map{}
@@ -234,6 +236,8 @@ func TestDispatchPendingCallbacksHonorsBackoffAndPersistsSuccess(t *testing.T) {
 func TestDispatchPendingCallbacksResumesRetryAfterRestart(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
+	// Persisted callback state is visible before worker cleanup completes.
+	defer callbackWorkers.Wait()
 
 	callbackLimiter = make(chan struct{}, 1)
 	callbackInflight = sync.Map{}
@@ -282,6 +286,8 @@ func TestDispatchPendingCallbacksResumesRetryAfterRestart(t *testing.T) {
 		t.Fatalf("first callback request count = %d, want 1", got)
 	}
 
+	// Finish the old worker before simulating a process restart.
+	callbackWorkers.Wait()
 	callbackLimiter = make(chan struct{}, 1)
 	callbackInflight = sync.Map{}
 
@@ -307,6 +313,8 @@ func TestDispatchPendingCallbacksResumesRetryAfterRestart(t *testing.T) {
 func TestDispatchPendingCallbacksEpayRequiresAck(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
+	// Persisted callback state is visible before worker cleanup completes.
+	defer callbackWorkers.Wait()
 
 	callbackLimiter = make(chan struct{}, 1)
 	callbackInflight = sync.Map{}
@@ -361,6 +369,8 @@ func TestDispatchPendingCallbacksEpayRequiresAck(t *testing.T) {
 func TestDispatchPendingCallbacksEpayAcceptsTrimmedOk(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
+	// Persisted callback state is visible before worker cleanup completes.
+	defer callbackWorkers.Wait()
 
 	callbackLimiter = make(chan struct{}, 1)
 	callbackInflight = sync.Map{}
@@ -729,6 +739,8 @@ func TestSendOrderCallbackEpayPreservesStoredAlipayType(t *testing.T) {
 func TestDispatchPendingCallbacksEpayAcceptsSuccessAck(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
+	// Persisted callback state is visible before worker cleanup completes.
+	defer callbackWorkers.Wait()
 
 	callbackLimiter = make(chan struct{}, 1)
 	callbackInflight = sync.Map{}

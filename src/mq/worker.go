@@ -157,7 +157,11 @@ func dispatchPendingCallbacks() {
 
 		select {
 		case callbackLimiter <- struct{}{}:
-			go processCallback(tradeID)
+			callbackWorkers.Add(1)
+			go func() {
+				defer callbackWorkers.Done()
+				processCallback(tradeID)
+			}()
 		default:
 			callbackInflight.Delete(tradeID)
 			return

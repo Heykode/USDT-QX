@@ -276,6 +276,28 @@ func TestEnsureMoveTransferMatchesOrder(t *testing.T) {
 	if err := EnsureMoveTransferMatchesOrder(order, transfer); err != nil {
 		t.Fatalf("EnsureMoveTransferMatchesOrder: %v", err)
 	}
+	validTime := transfer.BlockTimeMs
+	for _, tc := range []struct {
+		name string
+		when int64
+		want string
+	}{
+		{name: "missing time", when: 0, want: "block time missing"},
+		{name: "payment before order", when: order.CreatedAt.TimestampMilli() - 1, want: "predates the order"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			oldTransfer := transfer
+			oldTransfer.BlockTimeMs = tc.when
+			if err := EnsureMoveTransferMatchesOrder(order, oldTransfer); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("time validation error = %v, want %s", err, tc.want)
+			}
+		})
+	}
+	transfer.BlockTimeMs = order.CreatedAt.TimestampMilli()
+	if err := EnsureMoveTransferMatchesOrder(order, transfer); err != nil {
+		t.Fatalf("payment in the order's creation millisecond: %v", err)
+	}
+	transfer.BlockTimeMs = validTime
 
 	transfer.RawAmount = big.NewInt(3_400_000)
 	if err := EnsureMoveTransferMatchesOrder(order, transfer); err == nil || !strings.Contains(err.Error(), "amount") {
