@@ -2,6 +2,10 @@
 // authentication enforces MFA; this file only renders the extra input step.
 (() => {
  const originalFetch=window.fetch.bind(window);
+ // The compiled password form awaits mutateAsync without a catch. A deliberate
+ // cancellation must reject that mutation (never report password-change success)
+ // while avoiding an unhandled rejection. Do not suppress actual API failures.
+ window.addEventListener('unhandledrejection',event=>{if(event.reason?.qx_mfa_cancelled===true)event.preventDefault();});
  const zh=()=>(document.cookie.match(/(?:^|; )PARAGLIDE_LOCALE=([^;]+)/)?.[1]||navigator.language).startsWith('zh');
  const text=(cn,en)=>zh()?cn:en;
  function showLimit(response){
@@ -44,7 +48,11 @@
    let body;try{body=await saved.json();}catch{return response;}
    for(let attempt=0;attempt<5;attempt++){
     const code=await askCode(attempt>0,saved.signal);
-    if(!code)return new Response(JSON.stringify({status_code:400,message:'Verification cancelled'}),{status:400,headers:{'Content-Type':'application/json'}});
+    if(!code){
+     const login=url.pathname.endsWith('/login');
+     const body=login?{status_code:200,data:{mfa_cancelled:true}}:{status_code:409,qx_mfa_cancelled:true,message:'Verification cancelled'};
+     return new Response(JSON.stringify(body),{status:login?200:409,headers:{'Content-Type':'application/json'}});
+    }
     response=await originalFetch(new Request(saved.url,{method:'POST',headers:saved.headers,credentials:saved.credentials,signal:saved.signal,body:JSON.stringify({...body,code})}));
     showLimit(response);
     if(response.status!==400)break;
