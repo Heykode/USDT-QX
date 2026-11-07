@@ -129,7 +129,7 @@ func probeEvmRpcNode(ctx context.Context, node mdb.RpcNode) error {
 		return nil
 	}
 
-	if _, err := client.FilterLogs(ctx, query); err != nil {
+	if _, _, err := filterEvmLogsWithRangeLimit(ctx, client, query); err != nil {
 		return fmt.Errorf("filter logs: %w", err)
 	}
 	return nil
@@ -162,9 +162,9 @@ func evmHealthFilterQuery(network, nodeType string, head uint64) (ethereum.Filte
 	if cursor.ID > 0 && cursor.LastBlock >= 0 && cursor.LastBlock < headBlock {
 		fromBlock = cursor.LastBlock + 1
 	}
-	toBlock := fromBlock + evmBackfillBatchSize(network) - 1
-	if toBlock > headBlock {
-		toBlock = headBlock
+	toBlock := headBlock
+	if headBlock-fromBlock >= evmBackfillBatchSize(network) {
+		toBlock = fromBlock + evmBackfillBatchSize(network) - 1
 	}
 	query.FromBlock = big.NewInt(fromBlock)
 	query.ToBlock = big.NewInt(toBlock)

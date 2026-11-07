@@ -9,8 +9,8 @@ import (
 
 	"github.com/GMWalletApp/epusdt/model/data"
 	"github.com/GMWalletApp/epusdt/util/log"
+	"github.com/GMWalletApp/epusdt/util/security"
 	tb "gopkg.in/telebot.v3"
-	"gopkg.in/telebot.v3/middleware"
 )
 
 // bots is the single bot instance backing slash-command handlers
@@ -100,13 +100,16 @@ func reloadBot(reason string) error {
 		Token:       cfg.BotToken,
 		Poller:      &tb.LongPoller{Timeout: 50 * time.Second},
 		Synchronous: true,
+		OnError: func(err error, _ tb.Context) {
+			log.Sugar.Errorf("[telegram] bot error: %v", security.RedactError(err, cfg.BotToken))
+		},
 	}
 	newBot, err := tb.NewBot(botSetting)
 	if err != nil {
-		return fmt.Errorf("new bot: %w", err)
+		return fmt.Errorf("new bot: %w", security.RedactError(err, cfg.BotToken))
 	}
 	if err = newBot.SetCommands(Cmds); err != nil {
-		return fmt.Errorf("set commands: %w", err)
+		return fmt.Errorf("set commands: %w", security.RedactError(err, cfg.BotToken))
 	}
 	bots = newBot
 	RegisterHandle()
@@ -116,14 +119,26 @@ func reloadBot(reason string) error {
 	return nil
 }
 
-// RegisterHandle wires slash-command and text-message routes. The
-// admin whitelist uses the chat_id from the same channel row.
+// Apply the operator guard to the bot itself so dynamically registered wallet
+// buttons receive the same protection as slash commands and text messages.
 func RegisterHandle() {
 	if bots == nil {
 		return
 	}
-	adminOnly := bots.Group()
-	adminOnly.Use(middleware.Whitelist(adminChatID))
-	adminOnly.Handle(START_CMD, WalletList)
-	adminOnly.Handle(tb.OnText, OnTextMessageHandle)
+	bots.Use(adminSenderOnly(adminChatID))
+	bots.Handle(START_CMD, WalletList)
+	bots.Handle(tb.OnText, OnTextMessageHandle)
+}
+
+// Preserve the existing sender-ID whitelist. A notification group chat ID must
+// not silently grant wallet-management access to every member of that group.
+func adminSenderOnly(operatorID int64) tb.MiddlewareFunc {
+	return func(next tb.HandlerFunc) tb.HandlerFunc {
+		return func(c tb.Context) error {
+			if operatorID <= 0 || c == nil || c.Sender() == nil || c.Sender().ID != operatorID {
+				return nil
+			}
+			return next(c)
+		}
+	}
 }

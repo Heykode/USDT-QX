@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GMWalletApp/epusdt/util/security"
 	tb "gopkg.in/telebot.v3"
 )
 
@@ -48,7 +49,7 @@ func getOrCreateBot(cfg *TelegramConfig) (*tb.Bot, error) {
 	}
 	bot, err := tb.NewBot(settings)
 	if err != nil {
-		return nil, err
+		return nil, security.RedactError(err, cfg.BotToken)
 	}
 
 	botCacheMu.Lock()
@@ -143,5 +144,5 @@ func sendTelegram(configJSON, text string) error {
 		return err
 	}
 	_, err = bot.Send(&tb.User{ID: cfg.ChatID}, text, &tb.SendOptions{ParseMode: tb.ModeHTML})
-	return err
+	return security.RedactError(err, cfg.BotToken)
 }
