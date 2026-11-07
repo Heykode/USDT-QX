@@ -154,6 +154,7 @@ func runEvmBackfillLoop(ctx context.Context, client *ethclient.Client, network, 
 	if err != nil {
 		return err
 	}
+	batchSize := evmBackfillBatchSize(network)
 
 	for {
 		if ctx.Err() != nil {
@@ -197,9 +198,9 @@ func runEvmBackfillLoop(ctx context.Context, client *ethclient.Client, network, 
 		}
 
 		fromBlock := lastBlock + 1
-		toBlock := fromBlock + evmBackfillBatchSize(network) - 1
-		if toBlock > confirmedHead {
-			toBlock = confirmedHead
+		toBlock := confirmedHead
+		if confirmedHead-fromBlock >= batchSize {
+			toBlock = fromBlock + batchSize - 1
 		}
 
 		rpcCtx, cancel := context.WithTimeout(ctx, evmBackfillQueryTimeout)
@@ -215,10 +216,18 @@ func runEvmBackfillLoop(ctx context.Context, client *ethclient.Client, network, 
 		batchQuery.FromBlock = big.NewInt(fromBlock)
 		batchQuery.ToBlock = big.NewInt(toBlock)
 		batchQuery.Topics = evmTransferTopics(recipientTopics)
-		logs, err := client.FilterLogs(rpcCtx, batchQuery)
+		logs, scannedTo, err := filterEvmLogsWithRangeLimit(rpcCtx, client, batchQuery)
 		cancel()
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return fmt.Errorf("filter logs range=%d-%d: %w", fromBlock, toBlock, err)
+		}
+		if scannedTo < toBlock {
+			batchSize = scannedTo - fromBlock + 1
+			log.Sugar.Warnf("%s RPC log range reduced to %d blocks", logPrefix, batchSize)
+			toBlock = scannedTo
 		}
 
 		if err := processEvmBackfillLogs(ctx, client, network, logPrefix, logs, isWatchedRecipient); err != nil {

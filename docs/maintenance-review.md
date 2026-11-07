@@ -74,3 +74,7 @@
 - 新增默认源使原有“空地址就是接口不可用”的测试假设失效。该测试改为明确模拟默认源故障，保持“无有效报价不能创建订单”的原有断言，并防止测试意外访问真实网络。
 
 本机 Go 1.26.1 / macOS arm64 验证已全部通过：`CGO_ENABLED=0 go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...`，以及 Linux amd64／arm64 的 CGO0 编译。汇率模块另执行 `go test -race -count=10 ./config` 通过。GitHub Actions 继续对 PR 的确切提交执行 Linux 验证，通过后才合并；线上服务保持原版本。
+
+## 后续：Fork 逐项复审（2026-11-07）
+
+重新核实 16 个候选分支，选择并适配请求校验并发、返回地址协议、Telegram 菜单权限、Token 错误脱敏及 EVM RPC 区间自适应五项改进。逐项来源、未采用原因、兼容边界和测试记录见 [Fork 复审](fork-review-2026-11-07.md)。

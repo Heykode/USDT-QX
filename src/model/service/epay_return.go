@@ -50,7 +50,7 @@ func buildPublicRedirectURL(order *mdb.Orders) string {
 	if order == nil {
 		return ""
 	}
-	raw := strings.TrimSpace(order.RedirectUrl)
+	raw := safeMerchantRedirectURL(order.RedirectUrl)
 	if raw == "" || !isEPayOrder(order) {
 		return raw
 	}
@@ -123,6 +123,9 @@ func appendQueryParams(rawURL string, params map[string]string) (string, error) 
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		return "", constant.OrderRedirectURLErr
+	}
+	if err := validateMerchantRedirectURL(rawURL); err != nil {
+		return "", err
 	}
 
 	targetURL, err := url.Parse(rawURL)

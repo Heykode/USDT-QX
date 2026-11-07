@@ -122,6 +122,9 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
 	if err := security.ValidatePublicHTTPURL(notifyURL); err != nil {
 		return nil, constant.NotifyURLErr
 	}
+	if err := validateMerchantRedirectURL(req.RedirectUrl); err != nil {
+		return nil, err
+	}
 	paymentType := mdb.PaymentTypeGmpay
 	if strings.EqualFold(req.PaymentType, mdb.PaymentTypeEpay) {
 		paymentType = mdb.PaymentTypeEpay
