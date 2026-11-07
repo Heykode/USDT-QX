@@ -13,6 +13,7 @@ const (
 
 // Notification events (JSON keys in Events column).
 const (
+	NotifyEventRateAlert    = "rate_alert"
 	NotifyEventPaySuccess   = "pay_success"
 	NotifyEventOrderExpired = "order_expired"
 	NotifyEventDailyReport  = "daily_report"

@@ -8,7 +8,9 @@ import (
 	"github.com/GMWalletApp/epusdt/config"
 	"github.com/GMWalletApp/epusdt/model/dao"
 	"github.com/GMWalletApp/epusdt/model/mdb"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"gorm.io/gorm/logger"
 )
 
 // Simple in-process cache. Settings are read frequently (on every order
@@ -156,7 +158,12 @@ func SetSetting(group, key, value, valueType string) error {
 	row := mdb.Setting{Group: group, Key: key, Value: value, Type: valueType}
 	updates := clause.AssignmentColumns([]string{"group", "value", "type", "updated_at"})
 	updates = append(updates, clause.Assignment{Column: clause.Column{Name: "deleted_at"}, Value: nil})
-	err := dao.Mdb.Clauses(clause.OnConflict{
+	db := dao.Mdb
+	if key == config.VerifiedRateSettingKey {
+		// Error/debug SQL traces must not include provider credentials.
+		db = db.Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)})
+	}
+	err := db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
 		DoUpdates: updates,
 	}).Create(&row).Error
@@ -182,6 +189,7 @@ func DeleteSetting(key string) error {
 
 // sensitiveSettingKeys lists keys that must never be returned to API callers.
 var sensitiveSettingKeys = []string{
+	config.VerifiedRateSettingKey,
 	mdb.SettingKeyJwtSecret,
 	mdb.SettingKeyInitAdminPasswordPlain,
 	mdb.SettingKeyInitAdminPasswordHash,

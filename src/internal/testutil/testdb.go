@@ -44,6 +44,7 @@ func SetupTestDatabases(t testing.TB) func() {
 		&mdb.ApiKey{},
 		&mdb.Setting{},
 		&mdb.RateCache{},
+		&mdb.VerifiedRateCache{},
 		&mdb.NotificationChannel{},
 		&mdb.Chain{},
 		&mdb.ChainToken{},

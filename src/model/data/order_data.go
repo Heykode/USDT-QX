@@ -334,7 +334,7 @@ func MarkOrderSelected(tradeId string) error {
 // CompleteWaitSelectOrder fills a placeholder order with concrete chain fields
 // and makes it payable. It only updates status=WaitSelect rows so concurrent
 // switch-network attempts cannot overwrite a payable order.
-func CompleteWaitSelectOrder(tradeID string, network string, token string, receiveAddress string, actualAmount float64) (bool, error) {
+func CompleteWaitSelectOrder(tradeID string, network string, token string, receiveAddress string, actualAmount float64, rateQuote ...string) (bool, error) {
 	result := dao.Mdb.Model(&mdb.Orders{}).
 		Where("trade_id = ?", tradeID).
 		Where("status = ?", mdb.StatusWaitSelect).
@@ -344,6 +344,7 @@ func CompleteWaitSelectOrder(tradeID string, network string, token string, recei
 			"token":           strings.ToUpper(strings.TrimSpace(token)),
 			"receive_address": receiveAddress,
 			"actual_amount":   actualAmount,
+			"rate_quote":      firstRateQuote(rateQuote),
 			"is_selected":     false,
 			"created_at":      time.Now(),
 		})
@@ -353,7 +354,7 @@ func CompleteWaitSelectOrder(tradeID string, network string, token string, recei
 // CompleteWaitSelectOkPayOrderWithTransaction converts a placeholder parent
 // directly into an OkPay order. It intentionally does not create a local chain
 // lock because OkPay owns the hosted payment target.
-func CompleteWaitSelectOkPayOrderWithTransaction(tx *gorm.DB, tradeID string, token string, actualAmount float64) (bool, error) {
+func CompleteWaitSelectOkPayOrderWithTransaction(tx *gorm.DB, tradeID string, token string, actualAmount float64, rateQuote ...string) (bool, error) {
 	result := tx.Model(&mdb.Orders{}).
 		Where("trade_id = ?", tradeID).
 		Where("status = ?", mdb.StatusWaitSelect).
@@ -363,6 +364,7 @@ func CompleteWaitSelectOkPayOrderWithTransaction(tx *gorm.DB, tradeID string, to
 			"token":           strings.ToUpper(strings.TrimSpace(token)),
 			"receive_address": "OKPAY",
 			"actual_amount":   actualAmount,
+			"rate_quote":      firstRateQuote(rateQuote),
 			"is_selected":     false,
 			"pay_provider":    mdb.PaymentProviderOkPay,
 			"created_at":      time.Now(),
@@ -619,4 +621,11 @@ func UnLockTransactionByTradeId(tradeID string) error {
 
 func CleanupExpiredTransactionLocks() error {
 	return dao.RuntimeDB.Where("expires_at <= ?", time.Now()).Delete(&mdb.TransactionLock{}).Error
+}
+
+func firstRateQuote(quotes []string) string {
+	if len(quotes) > 0 {
+		return quotes[0]
+	}
+	return ""
 }
