@@ -1,12 +1,12 @@
 const $=id=>document.getElementById(id);
-let language=localStorage.getItem('qx-rate-language')||(navigator.language.startsWith('zh')?'zh':'en');
+let language=(document.cookie.match(/(?:^|; )PARAGLIDE_LOCALE=([^;]+)/)?.[1]||localStorage.getItem('qx-rate-language')||navigator.language).startsWith('zh')?'zh':'en';
 const zh=Object.fromEntries([...document.querySelectorAll('[data-i18n]')].map(el=>[el.dataset.i18n,el.textContent]));
 const en={back:'← Back to account settings',title:'Login security',authenticator:'Authenticator two-step verification',intro:'When enabled, sign in with your password and an authenticator code. Compatible with standard TOTP apps such as Google Authenticator and Microsoft Authenticator.',password:'Current password',code:'Verification or recovery code',scan:'Scan with your authenticator',manual:'Or enter this secret manually. Verification must succeed before two-step verification is enabled.',setup:'Set up authenticator',enable:'Confirm and enable',rotate:'Generate new recovery codes',disable:'Disable two-step verification',recoveryTitle:'Save your one-time recovery codes',recoveryNote:'These codes are displayed only now. Save them in your password manager. Each code works once. Generating new codes invalidates the previous set.',copy:'Copy recovery codes',saved:'Saved — hide recovery codes',sessions:'Login sessions',sessionNote:'Changing your password revokes all old sessions. Enabling or disabling two-step verification, or rotating recovery codes, creates a new session for this browser. Signing out here signs out every device.',logout:'Sign out all devices'};
 const t=(cn,en)=>language==='zh'?cn:en;
 let state,codes=[];
 const form=$('security-form');
 function applyLanguage(){document.documentElement.lang=language==='zh'?'zh-CN':'en';document.title='USDT-QX · '+t('登录安全','Login security');for(const el of document.querySelectorAll('[data-i18n]'))el.textContent=(language==='zh'?zh:en)[el.dataset.i18n];$('language').textContent=language==='zh'?'English':'中文';if(state)render(state);}
-$('language').onclick=()=>{language=language==='zh'?'en':'zh';localStorage.setItem('qx-rate-language',language);applyLanguage();};
+$('language').onclick=()=>{language=language==='zh'?'en':'zh';localStorage.setItem('qx-rate-language',language);document.cookie='PARAGLIDE_LOCALE='+(language==='zh'?'zh-CN':'en-US')+'; Path=/; SameSite=Lax; Max-Age=34560000';applyLanguage();};
 function notice(s,error=false){$('notice').textContent=s;$('notice').dataset.error=String(error);}
 function token(){try{return JSON.parse(decodeURIComponent(document.cookie.split('; ').find(s=>s.startsWith('access_token='))?.slice(13)||'""'));}catch{return '';}}
 function setToken(value){document.cookie='access_token='+encodeURIComponent(JSON.stringify(value))+'; Path=/; SameSite=Strict'+(location.protocol==='https:'?'; Secure':'');localStorage.removeItem('auth_user');}
