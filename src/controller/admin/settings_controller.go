@@ -134,7 +134,7 @@ func (c *BaseAdminController) UpsertSettings(ctx echo.Context) error {
 	}
 	for _, item := range req.Items {
 		key := strings.TrimSpace(item.Key)
-		if key == "" {
+		if key == "" || data.IsProtectedSettingKey(key) {
 			out = append(out, errorResult(item.Key, constant.SettingItemErr))
 			continue
 		}
@@ -432,7 +432,7 @@ func normalizeForcedRateListSetting(group, key, value string) (string, error) {
 // @Router       /admin/api/v1/settings/{key} [delete]
 func (c *BaseAdminController) DeleteSetting(ctx echo.Context) error {
 	key := strings.TrimSpace(ctx.Param("key"))
-	if key == config.VerifiedRateSettingKey {
+	if data.IsProtectedSettingKey(key) {
 		return c.FailJson(ctx, constant.SettingItemErr)
 	}
 	if key == "" {

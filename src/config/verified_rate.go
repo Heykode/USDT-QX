@@ -30,6 +30,9 @@ type VerifiedRateConfig struct {
 	RefreshSeconds     int     `json:"refresh_seconds"`
 	MaxAgeSeconds      int     `json:"max_age_seconds"`
 	MaxTimeSkewSeconds int     `json:"max_time_skew_seconds"`
+	FallbackEnabled    bool    `json:"fallback_enabled"`
+	FallbackPrice      float64 `json:"fallback_price"`      // billing currency per USDT
+	FallbackExpiresAt  string  `json:"fallback_expires_at"` // optional RFC3339 deadline
 }
 
 func DefaultVerifiedRateConfig() VerifiedRateConfig {
@@ -56,6 +59,14 @@ func ParseVerifiedRateConfig(raw string) (VerifiedRateConfig, error) {
 }
 
 func ValidateVerifiedRateConfig(c VerifiedRateConfig) error {
+	if c.FallbackExpiresAt != "" {
+		if _, err := time.Parse(time.RFC3339, c.FallbackExpiresAt); err != nil {
+			return fmt.Errorf("invalid fixed fallback expiry")
+		}
+	}
+	if c.FallbackEnabled && (!positiveFinite(c.FallbackPrice) || !positiveFinite(1/c.FallbackPrice) || c.FallbackPrice < c.MinPrice || c.FallbackPrice > c.MaxPrice) {
+		return fmt.Errorf("fixed fallback price must be positive and within administrator limits")
+	}
 	if c.Currency != "cny" && c.Currency != "usd" {
 		return fmt.Errorf("currency must be cny or usd")
 	}
@@ -163,9 +174,14 @@ func verifiedPaymentRate(coin, base string, cfg VerifiedRateConfig) (float64, st
 	if coin != "usdt" || base != cfg.Currency {
 		return 0, ""
 	} // never fall back to unverified pairs (including USD 1:1)
-	state, err := refreshVerifiedRate(cfg, false)
-	if err != nil || GetRateMode() != RateModeAuto || !verifiedStateUsable(state, cfg, rateNow()) {
+	// With per-order fallback enabled, each request attempts the providers first.
+	// Only concurrent calls may share a check completed after they started.
+	state, err := refreshVerifiedRate(cfg, cfg.FallbackEnabled)
+	if err != nil || GetRateMode() != RateModeAuto {
 		return 0, ""
+	}
+	if !verifiedStateUsable(state, cfg, rateNow()) {
+		return fixedFallbackRate(state, cfg, rateNow())
 	}
 	raw, _ := json.Marshal(struct {
 		Mode  string            `json:"mode"`
@@ -176,10 +192,48 @@ func verifiedPaymentRate(coin, base string, cfg VerifiedRateConfig) (float64, st
 	return 1 / state.Primary.Price, string(raw)
 }
 
+func fallbackUsable(s VerifiedRateState, cfg VerifiedRateConfig, now time.Time) bool {
+	current, err := GetVerifiedRateConfig()
+	if err != nil || !current.Enabled || !cfg.FallbackEnabled || GetRateMode() != RateModeAuto ||
+		verifiedConfigID(current) != verifiedConfigID(cfg) || s.ConfigID != verifiedConfigID(cfg) ||
+		s.LastAttemptAt.IsZero() || s.FailureKind == "storage" ||
+		!positiveFinite(cfg.FallbackPrice) || !positiveFinite(1/cfg.FallbackPrice) {
+		return false
+	}
+	if cfg.FallbackExpiresAt != "" {
+		expiry, err := time.Parse(time.RFC3339, cfg.FallbackExpiresAt)
+		if err != nil || !now.Before(expiry) {
+			return false
+		}
+	}
+	return true
+}
+
+func fixedFallbackRate(s VerifiedRateState, cfg VerifiedRateConfig, now time.Time) (float64, string) {
+	if !fallbackUsable(s, cfg, now) {
+		return 0, ""
+	}
+	reason := s.LastError
+	if reason == "" {
+		reason = "no usable verified quote"
+	}
+	raw, err := json.Marshal(map[string]any{
+		"mode": "fixed_fallback", "coin": "usdt", "base": cfg.Currency,
+		"rate": 1 / cfg.FallbackPrice, "price": cfg.FallbackPrice,
+		"expires_at": cfg.FallbackExpiresAt, "decided_at": now,
+		"fallback_reason": reason, "verification": s,
+	})
+	if err != nil {
+		return 0, ""
+	}
+	return 1 / cfg.FallbackPrice, string(raw)
+}
+
 // Serialized refreshes avoid publishing out of order and collapse concurrent
 // order requests. Refresh is synchronous when due: detected anomalies cannot
 // leak through a stale-while-revalidate return path.
 func refreshVerifiedRate(cfg VerifiedRateConfig, force bool) (VerifiedRateState, error) {
+	startedAt := rateNow()
 	verifiedRateMu.Lock()
 	defer verifiedRateMu.Unlock()
 	id := verifiedConfigID(cfg)
@@ -203,6 +257,9 @@ func refreshVerifiedRate(cfg VerifiedRateConfig, force bool) (VerifiedRateState,
 		return state, fmt.Errorf("verified rate configuration changed")
 	}
 	now := rateNow()
+	if force && state.LastAttemptAt.After(startedAt) && state.FailureKind != "storage" {
+		return state, nil
+	}
 	interval := time.Duration(cfg.RefreshSeconds) * time.Second
 	if state.FailureKind != "" {
 		interval = 60 * time.Second
@@ -321,6 +378,7 @@ type VerifiedRateStatus struct {
 	CoinGeckoKeyConfigured bool               `json:"coingecko_key_configured"`
 	State                  VerifiedRateState  `json:"state"`
 	Usable                 bool               `json:"usable"`
+	FallbackAvailable      bool               `json:"fallback_available"`
 	Error                  string             `json:"error,omitempty"`
 }
 
@@ -349,6 +407,7 @@ func GetVerifiedRateStatus() VerifiedRateStatus {
 		result.State = VerifiedRateState{Base: cfg.Currency}
 	}
 	result.Usable = cfg.Enabled && result.Mode == RateModeAuto && verifiedStateUsable(result.State, cfg, rateNow())
+	result.FallbackAvailable = !result.Usable && fallbackUsable(result.State, cfg, rateNow())
 	return result
 }
 

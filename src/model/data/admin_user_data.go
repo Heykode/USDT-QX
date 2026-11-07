@@ -248,6 +248,23 @@ func VerifyPassword(hash, plain string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(plain)) == nil
 }
 
+var dummyLoginHash = func() string {
+	b, err := bcrypt.GenerateFromPassword([]byte("nonexistent-admin-account"), bcrypt.DefaultCost)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}()
+
+func VerifyLoginPassword(hash, plain string) bool {
+	known := hash != ""
+	if !known {
+		hash = dummyLoginHash
+	}
+	valid := VerifyPassword(hash, plain)
+	return known && valid
+}
+
 // GetAdminUserByUsername returns the row for a username (case-insensitive).
 func GetAdminUserByUsername(username string) (*mdb.AdminUser, error) {
 	u := new(mdb.AdminUser)
@@ -267,7 +284,7 @@ func GetAdminUserByID(id uint64) (*mdb.AdminUser, error) {
 // UpdateAdminUserPassword rehashes and persists a new password. When the
 // change succeeds, the stored initial-password plaintext is deleted so it can
 // no longer be returned by the install flow.
-func UpdateAdminUserPassword(id uint64, newPlain string) error {
+func UpdateAdminUserPassword(id uint64, newPlain string, expectedVersion ...uint64) error {
 	hash, err := HashPassword(newPlain)
 	if err != nil {
 		return err
@@ -275,10 +292,16 @@ func UpdateAdminUserPassword(id uint64, newPlain string) error {
 	clearedPlaintext := false
 	changedCacheValue := ""
 	err = dao.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&mdb.AdminUser{}).
-			Where("id = ?", id).
-			Update("password_hash", hash).Error; err != nil {
-			return err
+		query := tx.Model(&mdb.AdminUser{}).Where("id = ?", id)
+		if len(expectedVersion) > 0 {
+			query = query.Where("session_version = ?", expectedVersion[0])
+		}
+		result := query.Updates(map[string]any{"password_hash": hash, "session_version": gorm.Expr("session_version + 1"), "mfa_pending_secret": "", "mfa_pending_expires_at": 0})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("admin session changed")
 		}
 
 		var plainRow mdb.Setting

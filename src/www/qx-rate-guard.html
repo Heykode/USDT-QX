@@ -7,7 +7,7 @@
 <body>
 <main>
 <header><a href="/settings/pay" data-i18n="back">← 返回汇率设置</a><button id="language" type="button">English</button></header>
-<div class="heading"><div><p class="eyebrow">USDT-QX</p><h1 data-i18n="title">双源自动汇率</h1><p class="muted" data-i18n="subtitle">CoinMarketCap 报价，CoinGecko 核验。异常时暂停新报价。</p></div><span class="badge" id="status">—</span></div>
+<div class="heading"><div><p class="eyebrow">USDT-QX</p><h1 data-i18n="title">双源自动汇率</h1><p class="muted" data-i18n="subtitle">CoinMarketCap 报价，CoinGecko 核验。自动报价优先，可为当前订单启用固定价兜底。</p></div><span class="badge" id="status">—</span></div>
 <div id="notice" role="status" aria-live="polite"></div>
 <section class="card"><h2 data-i18n="current">当前报价</h2><p id="mode-note" class="muted"></p><div class="quotes"><div><span>CoinMarketCap</span><strong id="primary">—</strong><small id="primary-time">—</small></div><div><span>CoinGecko</span><strong id="check">—</strong><small id="check-time">—</small></div><div><span data-i18n="spread">两源偏差</span><strong id="spread">—</strong><small id="expiry">—</small></div></div><p id="reason" class="warning"></p><p id="trusted" class="muted"></p><button id="refresh" type="button" data-i18n="refresh">重新核验</button></section>
 <form id="policy" class="card">
@@ -31,7 +31,14 @@
 <label><span data-i18n="interval">刷新间隔（秒）</span><input name="refresh_seconds" type="number" min="60" max="600" step="1" required></label>
 <label><span data-i18n="maxAge">来源报价最长有效时间（秒）</span><input name="max_age_seconds" type="number" min="60" max="1800" step="1" required></label>
 <label><span data-i18n="skew">两源时间最大间隔（秒）</span><input name="max_time_skew_seconds" type="number" min="1" max="1800" step="1" required></label>
-</div><p class="muted" data-i18n="failureNote">接口暂时故障时，仅沿用仍有效的已核验报价。发现价格冲突或异常时立即暂停，不回退到单源或固定值。阈值是可调整的起始设置，不是安全保证。</p>
+</div><p class="muted" data-i18n="failureNote">接口暂时故障时，仅沿用仍有效的已核验报价。发现异常时自动价暂停；开启固定价回退后，本单可使用你指定的价格。阈值是可调整的起始设置，不是安全保证。</p>
+<h3 data-i18n="fallbackTitle">本单固定价回退</h3>
+<label class="toggle"><input name="fallback_enabled" type="checkbox"><span data-i18n="fallbackEnable">自动价不可用时，允许本单使用固定价</span></label>
+<p class="muted" data-i18n="fallbackNote">每次报价先尝试双源，仍有效的可信报价可继续使用；只有自动价不可用才回退。下一单重新尝试，不切换全局模式。开启后会增加接口请求量。</p>
+<div class="grid">
+<label><span data-i18n="fallbackPrice">固定价：每 1 USDT 对应的计价币金额</span><input name="fallback_price" type="number" min="0" step="any"></label>
+<label><span data-i18n="fallbackExpiry">固定价有效至（本地时间，可留空）</span><input name="fallback_expires_at" type="datetime-local"></label>
+</div><p class="muted" data-i18n="fallbackExpiryNote">留空表示不设期限。自动源持续故障时，多个订单仍可能连续使用固定价；请保持异常通知并及时复核。</p>
 <div class="actions"><button type="submit" class="primary" data-i18n="save">保存设置</button><span class="muted" data-i18n="saveNote">保存会使旧配置的报价失效，下一次报价需重新核验。</span></div>
 </form>
 <section class="card"><h2 data-i18n="alerts">异常通知</h2><p class="muted" data-i18n="alertsNote">为现有通知渠道订阅汇率异常；同类持续故障最多每 15 分钟通知一次。通知渠道本身需已启用。</p><div id="channels"></div></section>

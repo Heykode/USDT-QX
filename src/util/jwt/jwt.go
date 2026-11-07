@@ -16,8 +16,9 @@ const DefaultExpiration = 24 * time.Hour
 
 // AdminClaims is the JWT payload for admin sessions.
 type AdminClaims struct {
-	AdminUserID uint64 `json:"uid"`
-	Username    string `json:"usr"`
+	AdminUserID    uint64 `json:"uid"`
+	Username       string `json:"usr"`
+	SessionVersion uint64 `json:"sv"`
 	jwt.RegisteredClaims
 }
 
@@ -41,14 +42,25 @@ func EnsureSecret() (string, error) {
 }
 
 // Sign returns a signed JWT for the given admin user.
-func Sign(userID uint64, username string) (string, error) {
+func Sign(userID uint64, username string, version ...uint64) (string, error) {
+	v := uint64(0)
+	if len(version) != 0 {
+		v = version[0]
+	} else {
+		user, err := data.GetAdminUserByID(userID)
+		if err != nil || user.ID == 0 {
+			return "", errors.New("admin user not found")
+		}
+		v = user.SessionVersion
+	}
 	secret, err := EnsureSecret()
 	if err != nil {
 		return "", err
 	}
 	claims := AdminClaims{
-		AdminUserID: userID,
-		Username:    username,
+		AdminUserID:    userID,
+		Username:       username,
+		SessionVersion: v,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(DefaultExpiration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -60,19 +72,25 @@ func Sign(userID uint64, username string) (string, error) {
 
 // Parse validates a token string and returns its claims.
 func Parse(tokenStr string) (*AdminClaims, error) {
+	if len(tokenStr) > 4096 {
+		return nil, errors.New("token too large")
+	}
 	secret, err := EnsureSecret()
 	if err != nil {
 		return nil, err
 	}
 	claims := &AdminClaims{}
 	_, err = jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+		if t.Method != jwt.SigningMethodHS256 {
 			return nil, errors.New("unexpected signing method")
 		}
 		return []byte(secret), nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}))
 	if err != nil {
 		return nil, err
+	}
+	if claims.ExpiresAt == nil || claims.IssuedAt == nil || claims.AdminUserID == 0 || claims.SessionVersion == 0 {
+		return nil, errors.New("incomplete session claims")
 	}
 	return claims, nil
 }

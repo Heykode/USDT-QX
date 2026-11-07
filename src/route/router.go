@@ -267,17 +267,27 @@ func registerAdminRoutes(e *echo.Echo) {
 		MaxAge:           86400,
 	})
 
-	adminV1 := e.Group("/admin/api/v1", adminCORS)
+	adminV1 := e.Group("/admin/api/v1", adminCORS, func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(ctx echo.Context) error {
+			ctx.Response().Header().Set("Cache-Control", "no-store")
+			return next(ctx)
+		}
+	})
 
 	// Public (no JWT)
 	adminV1.POST("/auth/login", admin.Ctrl.Login)
-	adminV1.GET("/auth/init-password-hash", admin.Ctrl.GetInitialPasswordHash)
 
 	// Authenticated
 	authed := adminV1.Group("", middleware.CheckAdminJWT())
+	authed.GET("/auth/init-password-hash", admin.Ctrl.GetInitialPasswordHash)
 	authed.POST("/auth/logout", admin.Ctrl.Logout)
 	authed.GET("/auth/me", admin.Ctrl.Me)
 	authed.POST("/auth/password", admin.Ctrl.ChangePassword)
+	authed.GET("/auth/security", admin.Ctrl.SecurityStatus)
+	authed.POST("/auth/mfa/setup", admin.Ctrl.SetupMFA)
+	authed.POST("/auth/mfa/enable", admin.Ctrl.EnableMFA)
+	authed.POST("/auth/mfa/disable", admin.Ctrl.DisableMFA)
+	authed.POST("/auth/mfa/recovery-codes", admin.Ctrl.RotateRecoveryCodes)
 
 	// API key management
 	authed.GET("/api-keys", admin.Ctrl.ListApiKeys)

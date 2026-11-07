@@ -159,7 +159,7 @@ func SetSetting(group, key, value, valueType string) error {
 	updates := clause.AssignmentColumns([]string{"group", "value", "type", "updated_at"})
 	updates = append(updates, clause.Assignment{Column: clause.Column{Name: "deleted_at"}, Value: nil})
 	db := dao.Mdb
-	if key == config.VerifiedRateSettingKey {
+	if IsProtectedSettingKey(key) {
 		// Error/debug SQL traces must not include provider credentials.
 		db = db.Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)})
 	}
@@ -195,6 +195,15 @@ var sensitiveSettingKeys = []string{
 	mdb.SettingKeyInitAdminPasswordHash,
 	mdb.SettingKeyInitAdminPasswordFetched,
 	mdb.SettingKeyInitAdminPasswordChanged,
+}
+
+func IsProtectedSettingKey(key string) bool {
+	for _, k := range sensitiveSettingKeys {
+		if strings.EqualFold(k, strings.TrimSpace(key)) {
+			return true
+		}
+	}
+	return false
 }
 
 func getFirstNonEmptySetting(fallback string, keys ...string) string {

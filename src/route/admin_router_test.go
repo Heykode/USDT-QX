@@ -320,7 +320,11 @@ func TestAdminInitialPasswordMetadataFlow(t *testing.T) {
 	_ = data.SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyInitAdminPasswordFetched, "false", mdb.SettingTypeBool)
 	_ = data.SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyInitAdminPasswordChanged, "false", mdb.SettingTypeBool)
 
-	recHash := doGet(e, "/admin/api/v1/auth/init-password-hash")
+	if rec := doGet(e, "/admin/api/v1/auth/init-password-hash"); rec.Code != 401 {
+		t.Fatal("public password fingerprint exposed")
+	}
+	token := adminLogin(t, e, testAdminUsername, initPassword)
+	recHash := doGetAdmin(e, "/admin/api/v1/auth/init-password-hash", token)
 	respHash := assertOK(t, recHash)
 	hashData, _ := respHash["data"].(map[string]interface{})
 	if got := hashData["password_hash"]; got != data.HashInitialAdminPassword(initPassword) {
@@ -329,8 +333,6 @@ func TestAdminInitialPasswordMetadataFlow(t *testing.T) {
 	if got, _ := hashData["password_changed"].(bool); got {
 		t.Fatalf("expected password_changed=false before change, got true")
 	}
-
-	token := adminLogin(t, e, testAdminUsername, initPassword)
 
 	recFetch := doGetAdmin(e, "/admin/api/v1/auth/init-password", token)
 	if recFetch.Code != http.StatusNotFound {
@@ -360,7 +362,11 @@ func TestAdminInitialPasswordMetadataFlow(t *testing.T) {
 	}, token)
 	assertOK(t, recChange)
 
-	recHash2 := doGet(e, "/admin/api/v1/auth/init-password-hash")
+	if rec := doGetAdmin(e, "/admin/api/v1/auth/me", token); rec.Code != 401 {
+		t.Fatal("old session survived password change")
+	}
+	token = adminLogin(t, e, testAdminUsername, "new-pass-789")
+	recHash2 := doGetAdmin(e, "/admin/api/v1/auth/init-password-hash", token)
 	respHash2 := assertOK(t, recHash2)
 	hashData2, _ := respHash2["data"].(map[string]interface{})
 	if got, _ := hashData2["password_changed"].(bool); !got {
