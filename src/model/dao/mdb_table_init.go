@@ -39,6 +39,7 @@ func MdbTableInit() {
 			{"ApiKey", &mdb.ApiKey{}},
 			{"Setting", &mdb.Setting{}},
 			{"RateCache", &mdb.RateCache{}},
+			{"VerifiedRateCache", &mdb.VerifiedRateCache{}},
 			{"NotificationChannel", &mdb.NotificationChannel{}},
 			{"Chain", &mdb.Chain{}},
 			{"ChainToken", &mdb.ChainToken{}},

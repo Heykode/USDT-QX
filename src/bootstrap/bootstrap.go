@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"html"
 	"sync"
 
 	"github.com/GMWalletApp/epusdt/config"
@@ -8,6 +9,7 @@ import (
 	"github.com/GMWalletApp/epusdt/model/data"
 	"github.com/GMWalletApp/epusdt/model/mdb"
 	"github.com/GMWalletApp/epusdt/mq"
+	"github.com/GMWalletApp/epusdt/notify"
 	"github.com/GMWalletApp/epusdt/task"
 	"github.com/GMWalletApp/epusdt/telegram"
 	appjwt "github.com/GMWalletApp/epusdt/util/jwt"
@@ -37,6 +39,12 @@ func InitApp() {
 		config.RateCacheLoad = data.LoadRateCacheSnapshot
 		config.RateCacheLoadAll = data.ListRateCacheSnapshots
 		config.RateCacheSave = data.SaveRateCacheSnapshot
+		config.VerifiedRateLoad = data.LoadVerifiedRateState
+		config.VerifiedRateSave = data.SaveVerifiedRateState
+		config.VerifiedRateAlert = func(message string) {
+			log.Sugar.Warn(message)
+			go notify.Dispatch(mdb.NotifyEventRateAlert, html.EscapeString(message))
+		}
 		// Seed rate.api_url from .env into the settings table on first run
 		// so the admin UI can display and change it without a code restart.
 		// Only written if the key is not already present in the DB.

@@ -54,10 +54,11 @@ type RateBaseStatus struct {
 }
 
 type RateStatus struct {
-	Mode            string           `json:"mode" enums:"fixed,auto" example:"auto"`
-	APIURL          string           `json:"api_url" example:"https://cdn.example.com/currencies/"`
-	CacheTTLSeconds int              `json:"cache_ttl_seconds" minimum:"10" maximum:"86400" example:"300"`
-	Bases           []RateBaseStatus `json:"bases"`
+	Verified        *VerifiedRateStatus `json:"verified,omitempty"`
+	Mode            string              `json:"mode" enums:"fixed,auto" example:"auto"`
+	APIURL          string              `json:"api_url" example:"https://cdn.example.com/currencies/"`
+	CacheTTLSeconds int                 `json:"cache_ttl_seconds" minimum:"10" maximum:"86400" example:"300"`
+	Bases           []RateBaseStatus    `json:"bases"`
 }
 
 var (
@@ -85,6 +86,11 @@ func GetRateCacheTTLSeconds() int {
 }
 
 func GetRateForCoin(coin string, base string) float64 {
+	rate, _ := GetPaymentRate(coin, base)
+	return rate
+}
+
+func getLegacyRateForCoin(coin string, base string, mode string) float64 {
 	coin = normalizeRateKey(coin)
 	base = normalizeRateKey(base)
 	if coin == "" || base == "" {
@@ -93,7 +99,7 @@ func GetRateForCoin(coin string, base string) float64 {
 	if coin == base {
 		return 1
 	}
-	if GetRateMode() == RateModeFixed {
+	if mode == RateModeFixed {
 		if forcedRate := getForcedRateForCoin(coin, base); forcedRate > 0 {
 			return forcedRate
 		}
@@ -146,6 +152,12 @@ func GetUsdtRate() float64 {
 }
 
 func RefreshRateBase(base string, force bool) RateRefreshResult {
+	if cfg, err := GetVerifiedRateConfig(); GetRateMode() == RateModeAuto && (err != nil || cfg.Enabled) {
+		if err != nil {
+			return RateRefreshResult{Base: normalizeRateKey(base), Error: err.Error()}
+		}
+		return refreshVerifiedRateBase(base, cfg, force)
+	}
 	return refreshRateBaseForCoin(base, "", force)
 }
 
@@ -311,6 +323,9 @@ func rateQuoteValidity(payload map[string]json.RawMessage, source string, now ti
 }
 
 func GetRateStatus() RateStatus {
+	if cfg, err := GetVerifiedRateConfig(); GetRateMode() == RateModeAuto && (err != nil || cfg.Enabled) {
+		return verifiedLegacyStatus()
+	}
 	snapshots := listRateCacheSnapshots()
 	now := rateNow()
 	bases := make([]RateBaseStatus, 0, len(snapshots))
@@ -338,6 +353,9 @@ func GetRateStatus() RateStatus {
 }
 
 func KnownRateBases() []string {
+	if cfg, err := GetVerifiedRateConfig(); err == nil && cfg.Enabled && GetRateMode() == RateModeAuto {
+		return []string{cfg.Currency}
+	}
 	set := make(map[string]struct{})
 	for _, snapshot := range listRateCacheSnapshots() {
 		if snapshot.Base != "" {
@@ -364,6 +382,7 @@ func KnownRateBases() []string {
 }
 
 func ResetRateCacheRuntime() {
+	resetVerifiedRateMemory()
 	rateCacheMu.Lock()
 	rateCacheMemory = make(map[string]RateCacheSnapshot)
 	rateCacheMu.Unlock()

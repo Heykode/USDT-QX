@@ -222,6 +222,8 @@ func normalizeSettingValue(value interface{}) (string, error) {
 
 func normalizeAndValidateSettingItem(group, key, value string) (string, error) {
 	switch key {
+	case config.VerifiedRateSettingKey:
+		return value, fmt.Errorf("use the dedicated verified rate endpoint")
 	case mdb.SettingKeyAmountPrecision:
 		if strings.ToLower(strings.TrimSpace(group)) != mdb.SettingGroupSystem {
 			return value, fmt.Errorf("%s must use group %s", key, mdb.SettingGroupSystem)
@@ -430,6 +432,9 @@ func normalizeForcedRateListSetting(group, key, value string) (string, error) {
 // @Router       /admin/api/v1/settings/{key} [delete]
 func (c *BaseAdminController) DeleteSetting(ctx echo.Context) error {
 	key := strings.TrimSpace(ctx.Param("key"))
+	if key == config.VerifiedRateSettingKey {
+		return c.FailJson(ctx, constant.SettingItemErr)
+	}
 	if key == "" {
 		return c.SucJson(ctx, nil)
 	}

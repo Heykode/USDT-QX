@@ -178,7 +178,7 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
 		return nil, err
 	}
 
-	rate := config.GetRateForCoin(strings.ToLower(token), strings.ToLower(currency))
+	rate, rateQuote := config.GetPaymentRate(strings.ToLower(token), strings.ToLower(currency))
 	if rate <= 0 {
 		return nil, constant.RateAmountErr
 	}
@@ -213,6 +213,7 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
 		Amount:         payAmount,
 		Currency:       currency,
 		ActualAmount:   availableAmount,
+		RateQuote:      rateQuote,
 		ReceiveAddress: availableAddress,
 		Token:          token,
 		Network:        network,
@@ -636,7 +637,7 @@ func SwitchNetwork(req *request.SwitchNetworkRequest) (*response.CheckoutCounter
 	}
 
 	// 6. Calculate amount for the new network
-	rate := config.GetRateForCoin(strings.ToLower(token), strings.ToLower(parent.Currency))
+	rate, rateQuote := config.GetPaymentRate(strings.ToLower(token), strings.ToLower(parent.Currency))
 	if rate <= 0 {
 		return nil, constant.RateAmountErr
 	}
@@ -674,6 +675,7 @@ func SwitchNetwork(req *request.SwitchNetworkRequest) (*response.CheckoutCounter
 		Amount:          parent.Amount,
 		Currency:        parent.Currency,
 		ActualAmount:    availableAmount,
+		RateQuote:       rateQuote,
 		ReceiveAddress:  availableAddress,
 		Token:           token,
 		Network:         network,
@@ -718,7 +720,7 @@ func completeWaitSelectOrder(parent *mdb.Orders, token string, network string) (
 		return nil, err
 	}
 
-	rate := config.GetRateForCoin(strings.ToLower(token), strings.ToLower(parent.Currency))
+	rate, rateQuote := config.GetPaymentRate(strings.ToLower(token), strings.ToLower(parent.Currency))
 	if rate <= 0 {
 		return nil, constant.RateAmountErr
 	}
@@ -745,7 +747,7 @@ func completeWaitSelectOrder(parent *mdb.Orders, token string, network string) (
 		return nil, constant.NotAvailableAmountErr
 	}
 
-	updated, err := data.CompleteWaitSelectOrder(parent.TradeId, network, token, availableAddress, availableAmount)
+	updated, err := data.CompleteWaitSelectOrder(parent.TradeId, network, token, availableAddress, availableAmount, rateQuote)
 	if err != nil {
 		_ = data.UnLockTransactionByTradeId(parent.TradeId)
 		return nil, err
@@ -786,7 +788,7 @@ func buildCheckoutResponse(order *mdb.Orders) *response.CheckoutCounterResponse 
 }
 
 func completeWaitSelectOkPayOrder(parent *mdb.Orders, token string) (*response.CheckoutCounterResponse, error) {
-	rate := config.GetRateForCoin(strings.ToLower(token), strings.ToLower(parent.Currency))
+	rate, rateQuote := config.GetPaymentRate(strings.ToLower(token), strings.ToLower(parent.Currency))
 	if rate <= 0 {
 		return nil, constant.RateAmountErr
 	}
@@ -837,7 +839,7 @@ func completeWaitSelectOkPayOrder(parent *mdb.Orders, token string) (*response.C
 		_ = data.MarkProviderOrderFailed(parent.TradeId, mdb.PaymentProviderOkPay)
 		return nil, err
 	}
-	updated, err := data.CompleteWaitSelectOkPayOrderWithTransaction(finalizeTx, parent.TradeId, token, amount)
+	updated, err := data.CompleteWaitSelectOkPayOrderWithTransaction(finalizeTx, parent.TradeId, token, amount, rateQuote)
 	if err != nil {
 		finalizeTx.Rollback()
 		_ = data.MarkProviderOrderFailed(parent.TradeId, mdb.PaymentProviderOkPay)
@@ -933,7 +935,7 @@ func switchToOkPay(parent *mdb.Orders, token string) (*response.CheckoutCounterR
 		return nil, constant.SubOrderLimitExceeded
 	}
 
-	rate := config.GetRateForCoin(strings.ToLower(token), strings.ToLower(parent.Currency))
+	rate, rateQuote := config.GetPaymentRate(strings.ToLower(token), strings.ToLower(parent.Currency))
 	if rate <= 0 {
 		return nil, constant.RateAmountErr
 	}
@@ -961,6 +963,7 @@ func switchToOkPay(parent *mdb.Orders, token string) (*response.CheckoutCounterR
 		Amount:          parent.Amount,
 		Currency:        parent.Currency,
 		ActualAmount:    amount,
+		RateQuote:       rateQuote,
 		ReceiveAddress:  "OKPAY",
 		Token:           token,
 		Network:         mdb.NetworkTron,

@@ -346,6 +346,9 @@ func registerAdminRoutes(e *echo.Echo) {
 	// Settings
 	authed.GET("/settings", admin.Ctrl.ListSettings)
 	authed.GET("/settings/rate/status", admin.Ctrl.RateStatus)
+	authed.GET("/settings/rate/verified", admin.Ctrl.VerifiedRateStatus)
+	authed.PUT("/settings/rate/verified", admin.Ctrl.SaveVerifiedRateConfig)
+	authed.POST("/settings/rate/verified/refresh", admin.Ctrl.RefreshVerifiedRate)
 	authed.POST("/settings/rate/refresh", admin.Ctrl.RefreshRates)
 	authed.PUT("/settings", admin.Ctrl.UpsertSettings)
 	authed.DELETE("/settings/:key", admin.Ctrl.DeleteSetting)
