@@ -128,7 +128,7 @@ func fetchCoinGeckoQuote(ctx context.Context, c VerifiedRateConfig) (ProviderQuo
 		return q, badQuote("CoinGecko: missing or invalid price")
 	}
 	var timestamp int64
-	if err := json.Unmarshal(values["last_updated_at"], &timestamp); err != nil || timestamp <= 0 {
+	if err := json.Unmarshal(values["last_updated_at"], &timestamp); err != nil || timestamp <= 0 || timestamp > rateNow().Unix() {
 		return q, badQuote("CoinGecko: missing or invalid timestamp")
 	}
 	q.QuotedAt = time.Unix(timestamp, 0).UTC()

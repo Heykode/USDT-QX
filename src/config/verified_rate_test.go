@@ -57,6 +57,9 @@ func setupVerified(t *testing.T) *verifiedFixture {
 		if f.failSave {
 			return errors.New("database write failed")
 		}
+		if _, err := json.Marshal(s); err != nil {
+			return err
+		}
 		f.stored = s
 		f.hasState = true
 		return nil
@@ -177,6 +180,7 @@ func TestVerifiedAnomaliesPauseEvenFreshCache(t *testing.T) {
 		{"conflict", func(f *verifiedFixture) { f.check = 7.1 }},
 		{"both jump", func(f *verifiedFixture) { f.primary = 8; f.check = 8 }},
 		{"tenfold", func(f *verifiedFixture) { f.primary = 70; f.check = 70 }},
+		{"extreme finite", func(f *verifiedFixture) { f.primary = 1e308; f.check = 7 }},
 		{"zero", func(f *verifiedFixture) { f.primary = 0 }},
 		{"negative", func(f *verifiedFixture) { f.check = -7 }},
 		{"stale", func(f *verifiedFixture) { f.quoteTime = f.now.Add(-601 * time.Second) }},
@@ -186,6 +190,9 @@ func TestVerifiedAnomaliesPauseEvenFreshCache(t *testing.T) {
 			f.primaryBody = `{"status":{"error_code":0},"data":[{"id":1,"symbol":"BTC","quote":[]}]}`
 		}},
 		{"missing timestamp", func(f *verifiedFixture) { f.checkBody = `{"tether":{"cny":7}}` }},
+		{"milliseconds timestamp", func(f *verifiedFixture) {
+			f.checkBody = fmt.Sprintf(`{"tether":{"cny":7,"last_updated_at":%d}}`, f.now.UnixMilli())
+		}},
 		{"auth", func(f *verifiedFixture) { f.checkStatus = 401 }},
 		{"bad quote plus outage", func(f *verifiedFixture) { f.primary = 70; f.checkStatus = 503 }},
 	}
@@ -267,6 +274,9 @@ func TestVerifiedRejectsInvalidPolicies(t *testing.T) {
 		if ValidateVerifiedRateConfig(c) == nil {
 			t.Fatal("invalid policy accepted")
 		}
+	}
+	if _, e := ParseVerifiedRateConfig(`null`); e == nil {
+		t.Fatal("null policy accepted")
 	}
 	if _, e := ParseVerifiedRateConfig(`{"unknown":true}`); e == nil {
 		t.Fatal("unknown fields accepted")

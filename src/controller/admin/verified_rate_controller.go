@@ -2,12 +2,13 @@ package admin
 
 import (
 	"encoding/json"
+	"io"
+	"strings"
+
 	"github.com/GMWalletApp/epusdt/config"
 	"github.com/GMWalletApp/epusdt/model/data"
 	"github.com/GMWalletApp/epusdt/util/constant"
 	"github.com/labstack/echo/v4"
-	"io"
-	"strings"
 )
 
 func (c *BaseAdminController) VerifiedRateStatus(ctx echo.Context) error {

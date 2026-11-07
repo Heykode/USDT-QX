@@ -2,12 +2,13 @@ package route
 
 import (
 	"encoding/json"
-	"github.com/GMWalletApp/epusdt/config"
-	"github.com/GMWalletApp/epusdt/model/data"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/GMWalletApp/epusdt/config"
+	"github.com/GMWalletApp/epusdt/model/data"
 )
 
 func TestVerifiedRateAdminConfigProtectsCredentials(t *testing.T) {

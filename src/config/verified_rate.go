@@ -41,6 +41,9 @@ func ParseVerifiedRateConfig(raw string) (VerifiedRateConfig, error) {
 	if strings.TrimSpace(raw) == "" {
 		return cfg, nil
 	}
+	if strings.TrimSpace(raw) == "null" {
+		return cfg, fmt.Errorf("invalid verified rate configuration")
+	}
 	d := json.NewDecoder(strings.NewReader(raw))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&cfg); err != nil {
@@ -272,8 +275,16 @@ type quoteFailure struct {
 
 func badQuote(message string) *quoteFailure { return &quoteFailure{"invalid_quote", message} }
 func positiveFinite(v float64) bool         { return v > 0 && !math.IsInf(v, 0) && !math.IsNaN(v) }
-func priceSpread(a, b float64) float64      { return math.Abs(a-b) / math.Min(a, b) * 100 }
-func relativeChange(a, b float64) float64   { return math.Abs(a-b) / b * 100 }
+func priceSpread(a, b float64) float64 {
+	spread := math.Abs(a-b) / math.Min(a, b) * 100
+	// Keep rejected observations serializable so even a huge finite quote can
+	// durably pause the engine. The cap still exceeds every allowed threshold.
+	if math.IsInf(spread, 0) || math.IsNaN(spread) {
+		return math.MaxFloat64
+	}
+	return spread
+}
+func relativeChange(a, b float64) float64 { return math.Abs(a-b) / b * 100 }
 
 func validateVerifiedQuotes(p, q ProviderQuote, previous VerifiedRateState, c VerifiedRateConfig, now time.Time) *quoteFailure {
 	for _, v := range []ProviderQuote{p, q} {
