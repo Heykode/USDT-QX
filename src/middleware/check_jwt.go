@@ -4,6 +4,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/GMWalletApp/epusdt/model/data"
+	"github.com/GMWalletApp/epusdt/model/mdb"
+
 	appjwt "github.com/GMWalletApp/epusdt/util/jwt"
 	"github.com/labstack/echo/v4"
 )
@@ -13,7 +16,8 @@ const (
 	// admin user's ID after successful JWT validation.
 	AdminUserIDKey = "admin_user_id"
 	// AdminUsernameKey mirrors the username for convenience.
-	AdminUsernameKey = "admin_username"
+	AdminUsernameKey       = "admin_username"
+	AdminSessionVersionKey = "admin_session_version"
 )
 
 // CheckAdminJWT validates an Authorization: Bearer <jwt> header against
@@ -38,6 +42,14 @@ func CheckAdminJWT() echo.MiddlewareFunc {
 			if err != nil {
 				return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
 			}
+			user, err := data.GetAdminUserByID(claims.AdminUserID)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusServiceUnavailable, "session unavailable")
+			}
+			if user.ID == 0 || user.Status != mdb.AdminUserStatusEnable || user.SessionVersion != claims.SessionVersion {
+				return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+			}
+			ctx.Set(AdminSessionVersionKey, claims.SessionVersion)
 			ctx.Set(AdminUserIDKey, claims.AdminUserID)
 			ctx.Set(AdminUsernameKey, claims.Username)
 			return next(ctx)

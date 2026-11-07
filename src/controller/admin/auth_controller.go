@@ -1,6 +1,10 @@
 package admin
 
 import (
+	"net/http"
+	"time"
+
+	"github.com/GMWalletApp/epusdt/middleware"
 	"github.com/GMWalletApp/epusdt/model/data"
 	"github.com/GMWalletApp/epusdt/model/mdb"
 	"github.com/GMWalletApp/epusdt/util/constant"
@@ -12,6 +16,7 @@ import (
 type LoginRequest struct {
 	Username string `json:"username" validate:"required" example:"admin"`
 	Password string `json:"password" validate:"required" example:"password123"`
+	Code     string `json:"code"`
 }
 
 // LoginResponse is the response for a successful login.
@@ -25,6 +30,7 @@ type LoginResponse struct {
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password" validate:"required" example:"old_pass"`
 	NewPassword string `json:"new_password" validate:"required|minLen:6" example:"new_pass123"`
+	Code        string `json:"code"`
 }
 
 // MeResponse wraps AdminUser with a default-password flag.
@@ -44,6 +50,7 @@ type MeResponse struct {
 // @Failure      400 {object} response.ApiResponse
 // @Router       /admin/api/v1/auth/login [post]
 func (c *BaseAdminController) Login(ctx echo.Context) error {
+	ctx.Request().Body = http.MaxBytesReader(ctx.Response(), ctx.Request().Body, 8192)
 	req := new(LoginRequest)
 	if err := ctx.Bind(req); err != nil {
 		return c.FailJson(ctx, constant.ParamsMarshalErr)
@@ -51,20 +58,35 @@ func (c *BaseAdminController) Login(ctx echo.Context) error {
 	if err := c.ValidateStruct(ctx, req); err != nil {
 		return c.FailJson(ctx, err)
 	}
+	if len(req.Username) > 64 || len(req.Password) > 72 || len(req.Code) > 64 {
+		return c.FailJson(ctx, constant.AdminInvalidCredentialErr)
+	}
+	if !allowAdminAttempt(ctx, req.Username) {
+		return nil
+	}
 	user, err := data.GetAdminUserByUsername(req.Username)
 	if err != nil {
 		return c.FailJson(ctx, err)
 	}
-	if user.ID == 0 || !data.VerifyPassword(user.PasswordHash, req.Password) {
+	if !data.VerifyLoginPassword(user.PasswordHash, req.Password) {
 		return c.FailJson(ctx, constant.AdminInvalidCredentialErr)
 	}
 	if user.Status != mdb.AdminUserStatusEnable {
 		return c.FailJson(ctx, constant.AdminUserDisabledErr)
 	}
-	token, err := appjwt.Sign(user.ID, user.Username)
+	if user.MFASecret != "" {
+		if req.Code == "" {
+			return c.SucJson(ctx, map[string]any{"mfa_required": true})
+		}
+		if data.ConsumeAdminSecondFactor(user, req.Code, time.Now()) != nil {
+			return c.FailJson(ctx, constant.AdminInvalidCredentialErr)
+		}
+	}
+	token, err := appjwt.Sign(user.ID, user.Username, user.SessionVersion)
 	if err != nil {
 		return c.FailJson(ctx, err)
 	}
+	loginGuard.ResetAccount(user.Username)
 	err = data.TouchAdminUserLastLogin(user.ID)
 	if err != nil {
 		return c.FailJson(ctx, err)
@@ -93,16 +115,22 @@ func (c *BaseAdminController) GetInitialPasswordHash(ctx echo.Context) error {
 	return c.SucJson(ctx, info)
 }
 
-// Logout is a no-op stub — tokens are stateless and the frontend
-// discards them. Kept for API symmetry with the documented spec.
+// Logout revokes all existing sessions for the current administrator.
 // @Summary      Admin logout
-// @Description  Logout (no-op, frontend discards token)
+// @Description  Revoke all sessions for this administrator
 // @Tags         Admin Auth
 // @Security     AdminJWT
 // @Produce      json
 // @Success      200 {object} response.ApiResponse
 // @Router       /admin/api/v1/auth/logout [post]
 func (c *BaseAdminController) Logout(ctx echo.Context) error {
+	user, err := data.GetAdminUserByID(currentAdminUserID(ctx))
+	if err != nil || user.ID == 0 || user.SessionVersion != ctx.Get(middleware.AdminSessionVersionKey) {
+		return c.FailJson(ctx, constant.AdminUnauthorizedErr)
+	}
+	if data.RevokeAdminSessions(user) != nil {
+		return c.FailJson(ctx, constant.SystemErr)
+	}
 	return c.SucJson(ctx, nil)
 }
 
@@ -148,6 +176,7 @@ func (c *BaseAdminController) Me(ctx echo.Context) error {
 // @Failure      400 {object} response.ApiResponse
 // @Router       /admin/api/v1/auth/password [post]
 func (c *BaseAdminController) ChangePassword(ctx echo.Context) error {
+	ctx.Request().Body = http.MaxBytesReader(ctx.Response(), ctx.Request().Body, 8192)
 	uid := currentAdminUserID(ctx)
 	if uid == 0 {
 		return c.FailJson(ctx, constant.AdminUnauthorizedErr)
@@ -163,11 +192,29 @@ func (c *BaseAdminController) ChangePassword(ctx echo.Context) error {
 	if err != nil {
 		return c.FailJson(ctx, err)
 	}
-	if user.ID == 0 || !data.VerifyPassword(user.PasswordHash, req.OldPassword) {
+	if user.ID == 0 || user.SessionVersion != ctx.Get(middleware.AdminSessionVersionKey) {
+		return c.FailJson(ctx, constant.AdminUnauthorizedErr)
+	}
+	if len(req.NewPassword) > 72 || len(req.OldPassword) > 72 || len(req.Code) > 64 {
+		return c.FailJson(ctx, constant.ParamsMarshalErr)
+	}
+	if !allowAdminAttempt(ctx, user.Username) {
+		return nil
+	}
+	if !data.VerifyLoginPassword(user.PasswordHash, req.OldPassword) {
 		return c.FailJson(ctx, constant.AdminOldPasswordErr)
 	}
-	if err := data.UpdateAdminUserPassword(uid, req.NewPassword); err != nil {
+	if user.MFASecret != "" {
+		if req.Code == "" {
+			return c.SucJson(ctx, map[string]any{"mfa_required": true})
+		}
+		if data.ConsumeAdminSecondFactor(user, req.Code, time.Now()) != nil {
+			return c.FailJson(ctx, constant.AdminInvalidCredentialErr)
+		}
+	}
+	if err := data.UpdateAdminUserPassword(uid, req.NewPassword, user.SessionVersion); err != nil {
 		return c.FailJson(ctx, err)
 	}
+	loginGuard.ResetAccount(user.Username)
 	return c.SucJson(ctx, nil)
 }

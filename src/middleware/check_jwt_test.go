@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/GMWalletApp/epusdt/internal/testutil"
+	"github.com/GMWalletApp/epusdt/model/dao"
 	"github.com/GMWalletApp/epusdt/model/data"
 	"github.com/GMWalletApp/epusdt/model/mdb"
 	appjwt "github.com/GMWalletApp/epusdt/util/jwt"
@@ -71,6 +72,11 @@ func TestCheckAdminJWTAcceptsBearerAndBareTokens(t *testing.T) {
 
 	if err := data.SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyJwtSecret, "test-jwt-secret", mdb.SettingTypeString); err != nil {
 		t.Fatalf("seed jwt secret: %v", err)
+	}
+	user := &mdb.AdminUser{Username: "admin", Status: mdb.AdminUserStatusEnable}
+	user.ID = 42
+	if err := dao.Mdb.Create(user).Error; err != nil {
+		t.Fatal(err)
 	}
 	token, err := appjwt.Sign(42, "admin")
 	if err != nil {

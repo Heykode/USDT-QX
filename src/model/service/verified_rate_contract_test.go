@@ -117,4 +117,29 @@ func TestVerifiedRateDiscountAndOldOrderSurvivePause(t *testing.T) {
 	if _, err := CreateTransaction(newCreateTransactionRequest("verified-expired", 90), nil); err == nil {
 		t.Fatal("expired cached quote allowed new order")
 	}
+	// Enable per-order fallback, then prove a real order stores the decision and
+	// the immediately following order recovers without a global mode change.
+	cfg.FallbackEnabled = true
+	cfg.FallbackPrice = 7.5
+	raw, _ = json.Marshal(cfg)
+	if err := data.SetSetting("rate", config.VerifiedRateSettingKey, string(raw), "json"); err != nil {
+		t.Fatal(err)
+	}
+	fixed, err := CreateTransaction(newCreateTransactionRequest("verified-fixed-fallback", 90), nil)
+	if err != nil || fixed.ActualAmount != 12 {
+		t.Fatalf("discounted fallback failed: %v", err)
+	}
+	fixedRow, _ := data.GetOrderInfoByTradeId(fixed.TradeId)
+	if !strings.Contains(fixedRow.RateQuote, `"fixed_fallback"`) || !strings.Contains(fixedRow.RateQuote, `"fallback_reason"`) {
+		t.Fatal("order omitted fallback audit")
+	}
+	offline = false
+	recovered, err := CreateTransaction(newCreateTransactionRequest("verified-auto-recovered", 80), nil)
+	if err != nil || recovered.ActualAmount != 10 {
+		t.Fatalf("next order did not recover automatic rate: %v", err)
+	}
+	fixedCheckout, err := GetCheckoutCounterByTradeId(fixed.TradeId)
+	if err != nil || fixedCheckout.ActualAmount != 12 {
+		t.Fatal("automatic recovery repriced fixed order")
+	}
 }

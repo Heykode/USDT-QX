@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/GMWalletApp/epusdt/config"
+	"github.com/GMWalletApp/epusdt/controller/admin"
 	"github.com/GMWalletApp/epusdt/model/dao"
 	"github.com/GMWalletApp/epusdt/model/data"
 	"github.com/GMWalletApp/epusdt/model/mdb"
@@ -36,6 +37,7 @@ const testAPIToken = "test-secret-token"
 
 func setupTestEnv(t *testing.T) *echo.Echo {
 	t.Helper()
+	admin.ResetSecurityLimiterForTest()
 
 	tmpDir := t.TempDir()
 
@@ -46,6 +48,7 @@ func setupTestEnv(t *testing.T) *echo.Echo {
 	viper.Set("order_expiration_time", 10)
 	viper.Set("api_rate_url", "")
 	viper.Set("runtime_root_path", tmpDir)
+	viper.Set("admin_mfa_key_file", tmpDir+"/admin-mfa.key")
 	viper.Set("log_save_path", tmpDir)
 	viper.Set("sqlite_database_filename", tmpDir+"/test.db")
 	viper.Set("runtime_sqlite_filename", tmpDir+"/runtime.db")
