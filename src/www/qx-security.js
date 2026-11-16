@@ -1,17 +1,17 @@
-const $=id=>document.getElementById(id);
+export function mount(root, { signal, onSessionToken }) {
+const $=id=>root.getElementById(id);
 let language=(document.cookie.match(/(?:^|; )PARAGLIDE_LOCALE=([^;]+)/)?.[1]||localStorage.getItem('qx-rate-language')||navigator.language).startsWith('zh')?'zh':'en';
-const zh=Object.fromEntries([...document.querySelectorAll('[data-i18n]')].map(el=>[el.dataset.i18n,el.textContent]));
+const zh=Object.fromEntries([...root.querySelectorAll('[data-i18n]')].map(el=>[el.dataset.i18n,el.textContent]));
 const en={navHome:'USDT-QX · Admin',navPay:'Payment settings',navRates:'Verified rates',navSecurity:'Login security',title:'Login security',authenticator:'Authenticator two-step verification',intro:'When enabled, sign in with your password and an authenticator code. Compatible with standard TOTP apps such as Google Authenticator and Microsoft Authenticator.',password:'Current password',code:'Verification or recovery code',scan:'Scan with your authenticator',manual:'Or enter this secret manually. Verification must succeed before two-step verification is enabled.',setup:'Set up authenticator',enable:'Confirm and enable',rotate:'Generate new recovery codes',disable:'Disable two-step verification',recoveryTitle:'Save your one-time recovery codes',recoveryNote:'These codes are displayed only now. Save them in your password manager. Each code works once. Generating new codes invalidates the previous set.',copy:'Copy recovery codes',saved:'Saved — hide recovery codes',sessions:'Login sessions',sessionNote:'Changing your password revokes all old sessions. Enabling or disabling two-step verification, or rotating recovery codes, creates a new session for this browser. Signing out here signs out every device.',changePassword:'Change password',logout:'Sign out all devices'};
 const t=(cn,en)=>language==='zh'?cn:en;
 let state,codes=[];
 const form=$('security-form');
-function applyLanguage(){document.documentElement.lang=language==='zh'?'zh-CN':'en';document.title='USDT-QX · '+t('登录安全','Login security');for(const el of document.querySelectorAll('[data-i18n]'))el.textContent=(language==='zh'?zh:en)[el.dataset.i18n];$('language').textContent=language==='zh'?'English':'中文';if(state)render(state);}
-$('language').onclick=()=>{language=language==='zh'?'en':'zh';localStorage.setItem('qx-rate-language',language);document.cookie='PARAGLIDE_LOCALE='+(language==='zh'?'zh-CN':'en-US')+'; Path=/; SameSite=Lax; Max-Age=34560000';applyLanguage();};
-function notice(s,error=false){$('notice').textContent=s;$('notice').dataset.error=String(error);}
+function applyLanguage(){document.documentElement.lang=language==='zh'?'zh-CN':'en';document.title='USDT-QX · '+t('登录安全','Login security');for(const el of root.querySelectorAll('[data-i18n]'))el.textContent=(language==='zh'?zh:en)[el.dataset.i18n];if(state)render(state);}
+function notice(s,error=false){if(signal.aborted)return;$('notice').textContent=s;$('notice').dataset.error=String(error);}
 function token(){try{return JSON.parse(decodeURIComponent(document.cookie.split('; ').find(s=>s.startsWith('access_token='))?.slice(13)||'""'));}catch{return '';}}
-function setToken(value){document.cookie='access_token='+encodeURIComponent(JSON.stringify(value))+'; Path=/; SameSite=Strict'+(location.protocol==='https:'?'; Secure':'');localStorage.removeItem('auth_user');}
-function signIn(){location.replace('/sign-in?redirect='+encodeURIComponent('/qx-security.html'));}
-async function api(path,body){const access=token();if(!access){signIn();throw Error(t('请登录。','Please sign in.'));}const r=await fetch('/admin/api/v1/auth/'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+access,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store'});if(r.status===401){signIn();throw Error(t('登录已失效。','Session expired.'));}if(r.status===429)throw Error(t('尝试次数过多，请稍后再试。','Too many attempts. Try again later.'));const result=await r.json();if(!r.ok)throw Error(t('操作未完成，请检查密码、验证码或绑定有效期。','Request failed. Check your password, code and enrollment expiry.'));if(result.data?.token)setToken(result.data.token);return result.data;}
+function setToken(value){onSessionToken(value);document.cookie='access_token='+encodeURIComponent(JSON.stringify(value))+'; Path=/; SameSite=Strict'+(location.protocol==='https:'?'; Secure':'');localStorage.removeItem('auth_user');}
+function signIn(){location.replace('/sign-in?redirect='+encodeURIComponent('/account/security'));}
+async function api(path,body){const access=token();if(!access){signIn();throw Error(t('请登录。','Please sign in.'));}const r=await fetch('/admin/api/v1/auth/'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+access,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store',signal});signal.throwIfAborted();if(r.status===401){signIn();throw Error(t('登录已失效。','Session expired.'));}if(r.status===429)throw Error(t('尝试次数过多，请稍后再试。','Too many attempts. Try again later.'));const result=await r.json();signal.throwIfAborted();if(!r.ok)throw Error(t('操作未完成，请检查密码、验证码或绑定有效期。','Request failed. Check your password, code and enrollment expiry.'));if(result.data?.token)setToken(result.data.token);return result.data;}
 function render(data){state=data;$('account').textContent=data.username;$('status').textContent=data.mfa_enabled?t('已启用两步验证','Two-step verification enabled'):t('尚未启用','Not enabled');$('status').dataset.state=data.mfa_enabled?'ok':'';$('setup').hidden=data.mfa_enabled||!$('enrollment').hidden;$('rotate').hidden=$('disable').hidden=!data.mfa_enabled;$('code-field').hidden=!data.mfa_enabled&&$('enrollment').hidden;form.elements.code.required=!$('code-field').hidden;$('remaining').textContent=data.mfa_enabled?t('剩余恢复码：','Recovery codes remaining: ')+data.recovery_codes_remaining:'';}
 function clearEnrollment(){$('enrollment').hidden=true;$('enable').hidden=true;$('qr').removeAttribute('src');$('secret').textContent='';$('setup-expiry').textContent='';}
 function hideCodes(){codes=[];$('codes').replaceChildren();$('recovery').hidden=true;}
@@ -23,5 +23,10 @@ form.onsubmit=async event=>{event.preventDefault();const action=event.submitter?
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText(codes.join('\n'));notice(t('恢复码已复制。','Recovery codes copied.'));}catch{notice(t('复制失败，请手动保存。','Copy failed. Save the codes manually.'),true);}};
 $('saved').onclick=hideCodes;
 $('logout').onclick=async()=>{try{await api('logout',{});document.cookie='access_token=; Path=/; Max-Age=0';localStorage.removeItem('auth_user');location.replace('/sign-in');}catch(e){notice(e.message,true);}};
-window.addEventListener('pagehide',()=>{hideCodes();clearEnrollment();form.reset();});
-applyLanguage();try{render(await api('security'));}catch(e){notice(e.message,true);form.querySelectorAll('button').forEach(b=>b.disabled=true);}
+const clearSensitive=()=>{hideCodes();clearEnrollment();form.reset();};
+window.addEventListener('pagehide',clearSensitive,{signal});
+signal.addEventListener('abort',clearSensitive,{once:true});
+applyLanguage();
+(async()=>{try{render(await api('security'));}catch(e){notice(e.message,true);form.querySelectorAll('button').forEach(b=>b.disabled=true);}})();
+
+}

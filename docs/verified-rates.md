@@ -16,7 +16,7 @@
 
 ## 启用方式
 
-后台设置导航增加“Verified USDT rates / 双源汇率”，页面路径为 `/qx-rate-guard.html`；也可直接打开此路径。页面复用已有后台登录，提供中文／英文切换。上游仓库只有已编译前端，因此新增可维护的独立 HTML/CSS/JS，不重写压缩包内容。
+后台系统配置增加“Verified rates / 双源汇率”，页面路径为 `/settings/verified-rates`，在现有后台框架内切换，保留侧栏和顶部工具栏。沿用后台登录、语言和主题设置；旧地址 `/qx-rate-guard.html` 自动转入新路径。上游只有已编译前端，通过独立适配模块注册原生路由，不修改压缩 bundle。维护及验证方式见 [后台导航](admin-navigation.md)。
 
 1. 填写 CoinMarketCap 注册 Key 和 CoinGecko Key，选择对应的 CoinGecko Pro 或 Demo 端点。套餐选择不代表授予商用许可，需使用符合实际用途的授权。
 2. 选择订单计价币 CNY 或 USD，填写每 1 USDT 对应的**人工核对参考价、最低价格、最高价格**。示例价格不是推荐的生产价格。

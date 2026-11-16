@@ -1,0 +1,39 @@
+<main>
+<div class="heading"><div><p class="eyebrow">USDT-QX</p><h1 data-i18n="title">双源自动汇率</h1><p class="muted" data-i18n="subtitle">CoinMarketCap 报价，CoinGecko 核验。自动报价优先，可为当前订单启用固定价兜底。</p></div><span class="badge" id="status">—</span></div>
+<div id="notice" role="status" aria-live="polite"></div>
+<section class="card mode-summary" aria-labelledby="mode-heading"><h2 id="mode-heading" data-i18n="effectiveTitle">正在生效的设置</h2><p id="mode-note"></p><p id="fallback-note" class="muted"></p><p class="muted" data-i18n="savedState">这里显示已保存的设置。修改表单后，需要保存才会生效。</p><div id="setup-guide" hidden><h3 data-i18n="setupTitle">启用双源还需要</h3><ol id="setup-steps"></ol></div><p class="muted source-note" data-i18n="sourceNote">使用内置默认源时，自动汇率按日更新。主地址和备用地址提供同一份数据；只有本页的两家供应商核验才是双源保护。</p></section>
+<section class="card"><h2 data-i18n="current">双源核验记录</h2><p id="quotes-note" class="muted"></p><div id="quote-values"><div class="quotes"><div><span>CoinMarketCap</span><strong id="primary">—</strong><small id="primary-time">—</small></div><div><span>CoinGecko</span><strong id="check">—</strong><small id="check-time">—</small></div><div><span data-i18n="spread">两源偏差</span><strong id="spread">—</strong><small id="expiry">—</small></div></div><p id="trusted" class="muted"></p></div><p id="reason" class="warning"></p><button id="refresh" type="button" data-i18n="refresh">重新核验</button></section>
+<form id="policy" class="card">
+<div class="section-heading"><h2 data-i18n="policy">报价保护设置</h2><label class="toggle"><input id="enabled" name="enabled" type="checkbox"><span data-i18n="enable">在自动模式下启用</span></label></div>
+<p class="muted" data-i18n="scope">支持所选计价币种兑换 USDT，适用于所有 USDT 收款链。启用后，其他自动换算币对将暂停；固定模式保持原有规则。</p>
+<div class="grid">
+<label><span data-i18n="currency">订单计价币种</span><select name="currency"><option value="cny">CNY</option><option value="usd">USD</option></select></label>
+<label><span data-i18n="plan">CoinGecko 套餐</span><select name="coingecko_plan"><option value="pro">Pro</option><option value="demo">Demo</option></select></label>
+<label><span>CoinMarketCap API Key</span><input name="cmc_api_key" type="password" autocomplete="new-password" maxlength="256"><small id="cmc-key-state"></small></label>
+<label><span>CoinGecko API Key</span><input name="coingecko_api_key" type="password" autocomplete="new-password" maxlength="256"><small id="cg-key-state"></small></label>
+</div><p class="muted" data-i18n="keys">Key 不会回显，留空保留已保存值。请使用符合你实际商业用途授权的套餐；选择 Demo 不代表已获得商用许可。</p>
+<h3 data-i18n="bounds">价格范围 · 每 1 USDT 对应的计价币金额</h3>
+<div class="grid three">
+<label><span data-i18n="reference">人工核对的参考价</span><input name="reference_price" type="number" min="0" step="any" required></label>
+<label><span data-i18n="min">最低合理价格</span><input name="min_price" type="number" min="0" step="any" required></label>
+<label><span data-i18n="max">最高合理价格</span><input name="max_price" type="number" min="0" step="any" required></label>
+</div><p class="muted" data-i18n="referenceNote">参考价由管理员核对后填写，不随接口自动漂移。市场发生真实大幅变化时，请复核并调整参考价。</p>
+<div class="grid">
+<label><span data-i18n="maxSpread">允许的两源偏差（%）</span><input name="max_spread_percent" type="number" min="0.01" max="5" step="0.01" required></label>
+<label><span data-i18n="maxJump">允许偏离参考价／上次可信价（%）</span><input name="max_jump_percent" type="number" min="0.01" max="10" step="0.01" required></label>
+<label><span data-i18n="interval">刷新间隔（秒）</span><input name="refresh_seconds" type="number" min="60" max="600" step="1" required></label>
+<label><span data-i18n="maxAge">来源报价最长有效时间（秒）</span><input name="max_age_seconds" type="number" min="60" max="1800" step="1" required></label>
+<label><span data-i18n="skew">两源时间最大间隔（秒）</span><input name="max_time_skew_seconds" type="number" min="1" max="1800" step="1" required></label>
+</div><p class="muted" data-i18n="failureNote">接口暂时故障时，仅沿用仍有效的已核验报价。发现异常时自动价暂停；开启固定价回退后，本单可使用你指定的价格。阈值是可调整的起始设置，不是安全保证。</p>
+<h3 data-i18n="fallbackTitle">本单固定价回退</h3>
+<label class="toggle"><input name="fallback_enabled" type="checkbox"><span data-i18n="fallbackEnable">自动价不可用时，允许本单使用固定价</span></label>
+<p class="muted" data-i18n="fallbackNote">每次报价先尝试双源，仍有效的可信报价可继续使用；只有自动价不可用才回退。下一单重新尝试，不切换全局模式。开启后会增加接口请求量。</p>
+<div class="grid">
+<label><span data-i18n="fallbackPrice">固定价：每 1 USDT 对应的计价币金额</span><input name="fallback_price" type="number" min="0" step="any"></label>
+<label><span data-i18n="fallbackExpiry">固定价有效至（本地时间，可留空）</span><input name="fallback_expires_at" type="datetime-local"></label>
+</div><p class="muted" data-i18n="fallbackExpiryNote">留空表示不设期限。自动源持续故障时，多个订单仍可能连续使用固定价；请保持异常通知并及时复核。</p>
+<div class="actions"><button type="submit" class="primary" data-i18n="save">保存设置</button><span class="muted" data-i18n="saveNote">保存会使旧配置的报价失效，下一次报价需重新核验。</span></div>
+</form>
+<section class="card"><h2 data-i18n="alerts">异常通知</h2><p class="muted" data-i18n="alertsNote">为现有通知渠道订阅汇率异常；同类持续故障最多每 15 分钟通知一次。通知渠道本身需已启用。</p><div id="channels"></div></section>
+<footer data-i18n="footer">优惠先计算，汇率后换算。已创建订单的应付数量保持不变。</footer>
+</main>
