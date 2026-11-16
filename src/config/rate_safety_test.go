@@ -79,7 +79,7 @@ func TestRateQuoteDatesAndCacheValidity(t *testing.T) {
 			installSettingsGetter(t, map[string]string{"rate.mode": "auto", "rate.api_url": tc.source})
 			installRateCacheStore(t)
 			installMockHTTPClient(t, func(r *http.Request) (*http.Response, error) {
-				if r.URL.String() != tc.source+"/cny.json" {
+				if r.URL.String() != tc.source+"/cny.json" && !(tc.source == DefaultRateAPIURL && r.URL.String() == DefaultRateFallbackURL+"/cny.json") {
 					t.Errorf("request URL = %s", r.URL)
 				}
 				return rateResponse(r, tc.body), nil

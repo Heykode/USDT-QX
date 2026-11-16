@@ -45,10 +45,11 @@ func (r RpcHealthJob) Run() {
 		wg.Add(1)
 		go func(n mdb.RpcNode) {
 			defer wg.Done()
-			status, latency, _ := probeRpcNode(n)
+			status, latency, diagnostic := ProbeRpcNodeWithDiagnostic(n)
 			if status == mdb.RpcNodeStatusDown && n.Status != mdb.RpcNodeStatusDown {
-				// HTTP client errors can contain the full URL, including RPC keys.
-				log.Sugar.Errorf("[rpc-health] capability probe failed node=%s", data.RpcNodeLogLabel(n))
+				// Neither endpoint URLs nor provider error text are safe to log.
+				log.Sugar.Errorw("[rpc-health] capability probe failed",
+					"node_id", n.ID, "diagnostic", diagnostic)
 			}
 			if err := data.UpdateRpcNodeHealth(n.ID, status, latency); err != nil {
 				log.Sugar.Warnf("[rpc-health] update node %d err=%v", n.ID, err)
@@ -67,6 +68,13 @@ func ProbeRpcNode(node mdb.RpcNode) (string, int) {
 	return status, latency
 }
 
+// ProbeRpcNodeWithDiagnostic preserves the probe result and exposes only a
+// fixed failure classification, never provider messages or endpoint details.
+func ProbeRpcNodeWithDiagnostic(node mdb.RpcNode) (string, int, *RpcProbeDiagnostic) {
+	status, latency, err := probeRpcNode(node)
+	return status, latency, rpcProbeDiagnostic(err)
+}
+
 func probeRpcNode(node mdb.RpcNode) (string, int, error) {
 	node.Network = strings.ToLower(strings.TrimSpace(node.Network))
 	node.Type = strings.ToLower(strings.TrimSpace(node.Type))
@@ -82,11 +90,11 @@ func probeRpcNode(node mdb.RpcNode) (string, int, error) {
 
 	addr, err := ParseAddress(node.Url)
 	if err != nil {
-		return mdb.RpcNodeStatusDown, -1, err
+		return mdb.RpcNodeStatusDown, -1, &rpcProbeError{stage: rpcProbeStageConfiguration, cause: err}
 	}
 	dur, err := MeasureTCPDial(addr, rpcProbeTimeout)
 	if err != nil {
-		return mdb.RpcNodeStatusDown, -1, err
+		return mdb.RpcNodeStatusDown, -1, &rpcProbeError{stage: rpcProbeStageConnection, cause: err}
 	}
 	return mdb.RpcNodeStatusOk, int(dur.Milliseconds()), nil
 }
@@ -103,17 +111,17 @@ func isEvmRpcNetwork(network string) bool {
 func probeEvmRpcNode(ctx context.Context, node mdb.RpcNode) error {
 	client, err := ethclient.DialContext(ctx, strings.TrimSpace(node.Url))
 	if err != nil {
-		return fmt.Errorf("dial: %w", err)
+		return &rpcProbeError{stage: rpcProbeStageConnection, cause: err}
 	}
 	defer client.Close()
 
 	head, err := client.BlockNumber(ctx)
 	if err != nil {
-		return fmt.Errorf("block number: %w", err)
+		return &rpcProbeError{stage: rpcProbeStageBlockHeader, cause: err}
 	}
 	query, hasFilter, err := evmHealthFilterQuery(node.Network, node.Type, head)
 	if err != nil {
-		return err
+		return &rpcProbeError{stage: rpcProbeStageConfiguration, cause: err}
 	}
 	if !hasFilter {
 		return nil
@@ -123,14 +131,14 @@ func probeEvmRpcNode(ctx context.Context, node mdb.RpcNode) error {
 		logsCh := make(chan types.Log)
 		sub, err := client.SubscribeFilterLogs(ctx, query, logsCh)
 		if err != nil {
-			return fmt.Errorf("subscribe logs: %w", err)
+			return &rpcProbeError{stage: rpcProbeStageSubscription, cause: err}
 		}
 		sub.Unsubscribe()
 		return nil
 	}
 
 	if _, _, err := filterEvmLogsWithRangeLimit(ctx, client, query); err != nil {
-		return fmt.Errorf("filter logs: %w", err)
+		return &rpcProbeError{stage: rpcProbeStageHistoricalQuery, cause: err}
 	}
 	return nil
 }

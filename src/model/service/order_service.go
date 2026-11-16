@@ -3,6 +3,7 @@ package service
 import (
 	cryptorand "crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -772,7 +773,29 @@ func buildCheckoutResponse(order *mdb.Orders) *response.CheckoutCounterResponse 
 	if isEPayOrder(order) {
 		paymentType = mdb.PaymentTypeEpay
 	}
+	// Expose only the saved conversion factor, never the private audit or a
+	// current rate. Old orders without a valid snapshot omit this optional field.
+	var quote struct {
+		Coin         string          `json:"coin"`
+		Base         string          `json:"base"`
+		Rate         decimal.Decimal `json:"rate"`
+		Verification struct {
+			Base string `json:"base"`
+		} `json:"verification"`
+	}
+	conversionRate := ""
+	if json.Unmarshal([]byte(order.RateQuote), &quote) == nil {
+		base := quote.Base
+		if base == "" {
+			base = quote.Verification.Base
+		}
+		if strings.EqualFold(quote.Coin, order.Token) && strings.EqualFold(base, order.Currency) &&
+			quote.Rate.IsPositive() && quote.Rate.Exponent() >= -24 && quote.Rate.Exponent() <= 12 {
+			conversionRate = quote.Rate.String()
+		}
+	}
 	return &response.CheckoutCounterResponse{
+		ConversionRate: conversionRate,
 		TradeId:        order.TradeId,
 		Amount:         order.Amount,
 		ActualAmount:   order.ActualAmount,

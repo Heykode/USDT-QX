@@ -18,6 +18,10 @@ https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies
 
 该项目自己的 README 标明 **Daily Updated（每日更新）**。这是自动获取参考汇率，不是秒级交易所行情。缓存默认每 300 秒具备刷新条件，并不意味着上游每 300 秒产生新报价。该源用于 USDT/CNY 参考换算；本轮未验证每日报价对高波动币种的适用性。
 
+2026-11-16 增加该数据源官方推荐的传输备用：仅当使用上面的内置默认源、主端点连接失败、HTTP 错误、格式／报价日期无效或缺少当前需要的币种时，再尝试 `https://latest.currency-api.pages.dev/v1/currencies`。两个端点提供同一项目的数据，**不是独立双源核验**，不能防止同一数据源同时给出错误价格。自定义 API 地址不自动切到它们。
+
+主端点每次请求上限 5 秒，主／备整个抓取上限 10 秒，不额外自动重试，也不跟随官方端点重定向。请求使用明确的 USDT-QX 应用 User-Agent；Cloudflare Pages 可能拦截默认 HTTP 库标识。备用响应仍须通过相同日期、48 小时硬期限、响应大小和币种校验；两者都失败时仍按现有缓存有效期决定是否拒绝新报价，不自动使用固定价。缓存中的 `source_url` 保持配置源身份；成功使用备用会记录 `official Cloudflare fallback` 日志，两者失败时错误记录分别标明 jsDelivr／Cloudflare。已建订单金额不变。
+
 现有后台继续使用模式选择、API 地址、缓存 TTL、固定报价和手动刷新；没有新增供应商下拉菜单。新增的报价日期、失效时间及可用标记通过状态 API 提供，未重建上游编译后的前端界面。
 
 ## 金额怎么算
@@ -63,7 +67,7 @@ API 基地址会自动附加 `/<base>.json`，例如 CNY 请求 `/cny.json`。�
 - 已创建订单保存 `amount` 和 `actual_amount`，查看同一收银台不重新换算。即使报价过期且接口故障，原订单的付款目标与金额锁仍保留。
 - 切换链时创建新的子单会重新取价，因此报价不可用时也可能无法切换链；并非整个父子订单共享永久汇率。
 - auto 对 USD→USDT 仍按 1:1 特判，不通过行情接口追踪脱锚；fixed 可设置该币对固定值。
-- 未加入币安 C2C、币安账户流水监听、自动备用来源、异常幅度阈值或每笔订单的报价来源快照。
+- 单源模式未加入币安 C2C、币安账户流水监听或异常幅度阈值。可选双源保护和订单报价快照见 [双源文档](verified-rates.md)；本次官方传输备用不改变这些功能的开关。
 - 未真实转账、未部署新版、未改变线上模式。启用前仍需按实际收款链与回调做验收。
 
 ## 一手依据
@@ -72,5 +76,7 @@ API 基地址会自动附加 `/<base>.json`，例如 CNY 请求 `/cny.json`。�
 - [官方设置与初始模式](https://github.com/GMWalletApp/epusdt/blob/v2.0.0/src/model/mdb/settings.go)
 - [官方建单与切链换算](https://github.com/GMWalletApp/epusdt/blob/v2.0.0/src/model/service/order_service.go)
 - [数据源 README（Daily Updated）](https://github.com/fawazahmed0/exchange-api)
+- [数据源维护者给出的备用方案](https://github.com/fawazahmed0/exchange-api/issues/90)
+- [Cloudflare Pages 的 1010 错误与应用 User-Agent](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-1xxx-errors/error-1010/)
 
-2026-11-06 实测主 CDN 的 CNY 响应成功且含日期和正 USDT 报价；备用 Cloudflare 地址在本次访问中返回 403，未将其接成自动备用。公开接口可用性不作永久保证。
+2026-11-16 只读探测：主 CDN 的 CNY 响应成功，含 `2026-11-16` 日期和正 USDT 报价；默认 Python urllib 请求官方 Cloudflare 备用返回 403／1010。随后按 Cloudflare 官方说明改用明确的 USDT-QX 应用 User-Agent，本地返回 200，日期及 USDT 数值与主 CDN 相同；16 核部署服务器也已确认主、备端点均返回 200、当日日期和正 USDT 报价。端点探测不代表新代码已经上线，也不保证长期可用；两个地址都不通时的拒单保护仍保留。没有为该功能更换线上经济报价策略、启用双源或设置固定回退价格。

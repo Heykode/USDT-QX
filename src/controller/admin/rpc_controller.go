@@ -210,13 +210,14 @@ func (c *BaseAdminController) HealthCheckRpcNode(ctx echo.Context) error {
 	if row.ID == 0 {
 		return c.FailJson(ctx, constant.RpcNodeNotFoundErr)
 	}
-	status, latency := task.ProbeRpcNode(*row)
+	status, latency, diagnostic := task.ProbeRpcNodeWithDiagnostic(*row)
 	if err := data.UpdateRpcNodeHealth(id, status, latency); err != nil {
 		return c.FailJson(ctx, err)
 	}
-	return c.SucJson(ctx, map[string]interface{}{
-		"status":          status,
-		"last_latency_ms": latency,
+	return c.SucJson(ctx, RpcHealthCheckResponse{
+		Status:        status,
+		LastLatencyMs: latency,
+		Diagnostic:    diagnostic,
 	})
 }
 

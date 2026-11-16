@@ -6,10 +6,12 @@
 </head>
 <body>
 <main>
-<header><a href="/settings/pay" data-i18n="back">← 返回汇率设置</a><button id="language" type="button">English</button></header>
+<header><a class="brand-link" href="/dashboard" data-i18n="navHome">USDT-QX · 管理后台</a><button id="language" type="button">English</button></header>
+<nav class="settings-nav"><a href="/settings/pay" data-i18n="navPay">支付设置</a><a href="/qx-rate-guard.html" aria-current="page" data-i18n="navRates">双源汇率</a><a href="/qx-security.html" data-i18n="navSecurity">登录安全</a></nav>
 <div class="heading"><div><p class="eyebrow">USDT-QX</p><h1 data-i18n="title">双源自动汇率</h1><p class="muted" data-i18n="subtitle">CoinMarketCap 报价，CoinGecko 核验。自动报价优先，可为当前订单启用固定价兜底。</p></div><span class="badge" id="status">—</span></div>
 <div id="notice" role="status" aria-live="polite"></div>
-<section class="card"><h2 data-i18n="current">当前报价</h2><p id="mode-note" class="muted"></p><div class="quotes"><div><span>CoinMarketCap</span><strong id="primary">—</strong><small id="primary-time">—</small></div><div><span>CoinGecko</span><strong id="check">—</strong><small id="check-time">—</small></div><div><span data-i18n="spread">两源偏差</span><strong id="spread">—</strong><small id="expiry">—</small></div></div><p id="reason" class="warning"></p><p id="trusted" class="muted"></p><button id="refresh" type="button" data-i18n="refresh">重新核验</button></section>
+<section class="card mode-summary" aria-labelledby="mode-heading"><h2 id="mode-heading" data-i18n="effectiveTitle">正在生效的设置</h2><p id="mode-note"></p><p id="fallback-note" class="muted"></p><p class="muted" data-i18n="savedState">这里显示已保存的设置。修改表单后，需要保存才会生效。</p><div id="setup-guide" hidden><h3 data-i18n="setupTitle">启用双源还需要</h3><ol id="setup-steps"></ol></div><p class="muted source-note" data-i18n="sourceNote">使用内置默认源时，自动汇率按日更新。主地址和备用地址提供同一份数据；只有本页的两家供应商核验才是双源保护。</p></section>
+<section class="card"><h2 data-i18n="current">双源核验记录</h2><p id="quotes-note" class="muted"></p><div id="quote-values"><div class="quotes"><div><span>CoinMarketCap</span><strong id="primary">—</strong><small id="primary-time">—</small></div><div><span>CoinGecko</span><strong id="check">—</strong><small id="check-time">—</small></div><div><span data-i18n="spread">两源偏差</span><strong id="spread">—</strong><small id="expiry">—</small></div></div><p id="trusted" class="muted"></p></div><p id="reason" class="warning"></p><button id="refresh" type="button" data-i18n="refresh">重新核验</button></section>
 <form id="policy" class="card">
 <div class="section-heading"><h2 data-i18n="policy">报价保护设置</h2><label class="toggle"><input id="enabled" name="enabled" type="checkbox"><span data-i18n="enable">在自动模式下启用</span></label></div>
 <p class="muted" data-i18n="scope">支持所选计价币种兑换 USDT，适用于所有 USDT 收款链。启用后，其他自动换算币对将暂停；固定模式保持原有规则。</p>

@@ -1,9 +1,12 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -22,8 +25,11 @@ const (
 	MinRateCacheTTLSeconds = 10
 	MaxRateCacheTTLSeconds = 86400
 	// This source publishes daily reference rates, not live exchange quotes.
-	DefaultRateAPIURL = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies"
-	MaxRateQuoteAge   = 48 * time.Hour
+	DefaultRateAPIURL         = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies"
+	DefaultRateFallbackURL    = "https://latest.currency-api.pages.dev/v1/currencies"
+	MaxRateQuoteAge           = 48 * time.Hour
+	defaultRateFetchTimeout   = 10 * time.Second
+	defaultRateAttemptTimeout = 5 * time.Second
 )
 
 type RateRefreshResult struct {
@@ -189,7 +195,7 @@ func refreshRateBaseForCoin(base string, requiredCoin string, force bool) RateRe
 }
 
 func refreshRateBase(base string, requiredCoin string, source string) RateRefreshResult {
-	rates, quoteDate, expiresAt, err := fetchRatesForBase(base, source)
+	rates, quoteDate, expiresAt, err := fetchRatesForBase(base, source, requiredCoin)
 	attemptedAt := rateNow()
 	// Serialize publication so an old in-flight source cannot overwrite a
 	// newly selected source after that source has already published its quote.
@@ -242,21 +248,81 @@ func refreshRateBase(base string, requiredCoin string, source string) RateRefres
 	return refreshResultFromSnapshot(snapshot, false)
 }
 
-func fetchRatesForBase(base string, baseURL string) (map[string]float64, string, *time.Time, error) {
-	requestURL := strings.TrimRight(baseURL, "/") + "/" + url.PathEscape(base) + ".json"
-	resp, err := http_client.GetHttpClient().R().Get(requestURL)
+func fetchRatesForBase(base string, source string, requiredCoin string) (map[string]float64, string, *time.Time, error) {
+	if source != DefaultRateAPIURL {
+		// Explicit custom sources retain their existing request and validation
+		// rules. Never send them to an unrelated provider on failure.
+		return fetchRateEndpoint(context.Background(), base, source, source)
+	}
+
+	// These are two distribution endpoints for ONE daily data source, not
+	// independent price verification. Bound the entire refresh, including a
+	// stalled primary, without multiplying Resty's request/retry timeouts.
+	ctx, cancel := context.WithTimeout(context.Background(), defaultRateFetchTimeout)
+	defer cancel()
+	var failures []string
+	for _, endpoint := range []string{DefaultRateAPIURL, DefaultRateFallbackURL} {
+		rates, quoteDate, expiresAt, err := fetchRateEndpoint(ctx, base, endpoint, source)
+		if err == nil && requiredCoin != "" && rateFromRates(rates, requiredCoin) <= 0 {
+			err = fmt.Errorf("rate api response has no positive %s.%s rate", base, requiredCoin)
+		}
+		if err == nil {
+			if endpoint == DefaultRateFallbackURL {
+				log.Printf("fetched reference rates for %s using official Cloudflare fallback", base)
+			}
+			return rates, quoteDate, expiresAt, nil
+		}
+		label := "jsDelivr"
+		if endpoint == DefaultRateFallbackURL {
+			label = "Cloudflare"
+		}
+		failures = append(failures, label+": "+err.Error())
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return nil, "", nil, fmt.Errorf("default rate endpoints unavailable: %s", strings.Join(failures, "; "))
+}
+
+func fetchRateEndpoint(ctx context.Context, base string, endpoint string, source string) (map[string]float64, string, *time.Time, error) {
+	requestURL := strings.TrimRight(endpoint, "/") + "/" + url.PathEscape(base) + ".json"
+	client := http_client.GetHttpClient()
+	request := client.R().SetContext(ctx)
+	if source == DefaultRateAPIURL {
+		client.SetRetryCount(0).SetTimeout(defaultRateAttemptTimeout)
+		client.GetClient().CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		// Cloudflare Pages can reject generic HTTP-library user agents. Identify
+		// the application honestly instead of impersonating a browser.
+		request.SetHeader("User-Agent", "USDT-QX/2.0 (+https://github.com/GMWalletApp/epusdt)").SetDoNotParseResponse(true)
+	}
+	resp, err := request.Get(requestURL)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("call rate api: %w", err)
+	}
+	var body []byte
+	if source == DefaultRateAPIURL {
+		defer resp.RawBody().Close()
+		// The reference response is a small currency map. Keep a malformed
+		// official response from consuming unbounded memory before validation.
+		body, err = io.ReadAll(io.LimitReader(resp.RawBody(), (1<<20)+1))
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("read rate api response: %w", err)
+		}
+		if len(body) > 1<<20 {
+			return nil, "", nil, fmt.Errorf("rate api response exceeds size limit")
+		}
+	} else {
+		body = resp.Body()
 	}
 	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
 		return nil, "", nil, fmt.Errorf("call rate api unexpected status: %s", resp.Status())
 	}
 
 	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(resp.Body(), &payload); err != nil {
+	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, "", nil, fmt.Errorf("decode rate api response: %w", err)
 	}
-	quoteDate, expiresAt, err := rateQuoteValidity(payload, baseURL, rateNow())
+	quoteDate, expiresAt, err := rateQuoteValidity(payload, source, rateNow())
 	if err != nil {
 		return nil, "", nil, err
 	}

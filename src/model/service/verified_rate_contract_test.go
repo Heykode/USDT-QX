@@ -86,7 +86,7 @@ func TestVerifiedRateDiscountAndOldOrderSurvivePause(t *testing.T) {
 		t.Fatal("rejected quote left an order behind")
 	}
 	checkout, err := GetCheckoutCounterByTradeId(first.TradeId)
-	if err != nil || checkout.ActualAmount != 11.25 || checkout.ReceiveAddress != first.ReceiveAddress {
+	if err != nil || checkout.ActualAmount != 11.25 || checkout.ReceiveAddress != first.ReceiveAddress || checkout.ConversionRate != "0.125" {
 		t.Fatal("pause altered existing checkout")
 	}
 	owner, err := data.GetTradeIdByWalletAddressAndAmountAndToken("tron", first.ReceiveAddress, "USDT", first.ActualAmount)
@@ -141,5 +141,36 @@ func TestVerifiedRateDiscountAndOldOrderSurvivePause(t *testing.T) {
 	fixedCheckout, err := GetCheckoutCounterByTradeId(fixed.TradeId)
 	if err != nil || fixedCheckout.ActualAmount != 12 {
 		t.Fatal("automatic recovery repriced fixed order")
+	}
+}
+
+func TestCheckoutExposesOnlyStoredConversionRate(t *testing.T) {
+	for _, tc := range []struct{ name, quote, want string }{
+		{"fixed", `{"mode":"fixed","coin":"usdt","base":"cny","rate":0.125}`, "0.125"},
+		{"verified", `{"mode":"auto_verified","coin":"usdt","rate":0.125,"verification":{"base":"cny","config_id":"private-config","last_error":"internal-detail"}}`, "0.125"},
+		{"fallback", `{"mode":"fixed_fallback","coin":"usdt","base":"cny","rate":0.125,"fallback_reason":"internal-detail"}`, "0.125"},
+		{"legacy missing", "", ""},
+		{"malformed", `{`, ""},
+		{"wrong coin", `{"coin":"btc","base":"cny","rate":0.125}`, ""},
+		{"wrong currency", `{"coin":"usdt","base":"usd","rate":0.125}`, ""},
+		{"nonpositive", `{"coin":"usdt","base":"cny","rate":0}`, ""},
+		{"extreme exponent", `{"coin":"usdt","base":"cny","rate":1e100000}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			order := &mdb.Orders{Token: "USDT", Currency: "CNY", Amount: 200, ActualAmount: 25.0001, RateQuote: tc.quote}
+			got := buildCheckoutResponse(order)
+			if got.ConversionRate != tc.want || got.ActualAmount != order.ActualAmount {
+				t.Fatalf("incorrect checkout rate or changed payable amount: %+v", got)
+			}
+			raw, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, private := range []string{"rate_quote", "verification", "private-config", "internal-detail"} {
+				if strings.Contains(string(raw), private) {
+					t.Fatalf("checkout exposed private audit: %s", private)
+				}
+			}
+		})
 	}
 }
