@@ -1,7 +1,9 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +17,12 @@ import (
 	"github.com/GMWalletApp/epusdt/model/dao"
 	"github.com/GMWalletApp/epusdt/model/data"
 	"github.com/GMWalletApp/epusdt/model/mdb"
+	epLog "github.com/GMWalletApp/epusdt/util/log"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/gorilla/websocket"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // --------------- ParseAddress ---------------
@@ -231,12 +238,15 @@ func TestProbeRpcNode_EvmHTTPRequiresHistoricalLogs(t *testing.T) {
 	})
 	defer server.Close()
 
-	status, latency := ProbeRpcNode(mdb.RpcNode{Network: mdb.NetworkBsc, Type: mdb.RpcNodeTypeHttp, Url: server.URL})
+	status, latency, diagnostic := ProbeRpcNodeWithDiagnostic(mdb.RpcNode{Network: mdb.NetworkBsc, Type: mdb.RpcNodeTypeHttp, Url: server.URL})
 	if status != mdb.RpcNodeStatusOk {
 		t.Fatalf("status = %s, want ok", status)
 	}
 	if latency < 0 {
 		t.Fatalf("latency = %d, want >= 0", latency)
+	}
+	if diagnostic != nil {
+		t.Fatalf("healthy probe returned diagnostic: %+v", diagnostic)
 	}
 	if !sawLogs {
 		t.Fatal("probe did not call eth_getLogs")
@@ -289,9 +299,117 @@ func TestProbeRpcNode_EvmWSRejectsSubscriptionQuotaError(t *testing.T) {
 	defer server.Close()
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
-	status, latency := ProbeRpcNode(mdb.RpcNode{Network: mdb.NetworkBsc, Type: mdb.RpcNodeTypeWs, Url: wsURL})
+	status, latency, diagnostic := ProbeRpcNodeWithDiagnostic(mdb.RpcNode{Network: mdb.NetworkBsc, Type: mdb.RpcNodeTypeWs, Url: wsURL})
 	if status != mdb.RpcNodeStatusDown || latency != -1 {
 		t.Fatalf("probe = (%s, %d), want (down, -1)", status, latency)
+	}
+	if diagnostic == nil || diagnostic.Stage != "subscription" || diagnostic.Category != "rate_limited" || diagnostic.RPCCode == nil || *diagnostic.RPCCode != 15 {
+		t.Fatalf("subscription diagnostic = %+v", diagnostic)
+	}
+}
+
+func TestProbeRpcNodeDiagnosticsDoNotExposeProviderSecrets(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+	seedEvmHealthProbeState(t)
+
+	const secret = "provider-echoed-secret"
+	for _, tc := range []struct {
+		name, method, message, stage, category string
+		code                                   int
+	}{
+		{"unsupported header", "eth_blockNumber", "method not found " + secret, "block_header", "unsupported", -32601},
+		{"unsupported logs", "eth_getLogs", "eth_getLogs disabled " + secret, "historical_query", "unsupported", -32005},
+		{"rate limited logs", "eth_getLogs", "public endpoint rate limit " + secret, "historical_query", "rate_limited", -32005},
+		{"provider timeout", "eth_blockNumber", "Request timeout on the free plan, please upgrade to paid plan " + secret, "block_header", "timeout", -32000},
+		{"range limited logs", "eth_getLogs", "exceed maximum block range " + secret, "historical_query", "range_limit", -32602},
+		{"unavailable history", "eth_getLogs", "Archive requests not available " + secret, "historical_query", "history_unavailable", -32000},
+		{"unknown provider error", "eth_getLogs", secret, "historical_query", "provider_error", -32000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newEvmHealthHTTPServer(t, func(method string, _ json.RawMessage) (interface{}, *rpcHealthTestError) {
+				if method == tc.method {
+					return nil, &rpcHealthTestError{Code: tc.code, Message: tc.message}
+				}
+				return "0x100", nil
+			})
+			defer server.Close()
+			nodeURL := strings.Replace(server.URL, "http://", "http://user-secret:password-secret@", 1) + "/path-secret?key=query-secret"
+			status, latency, diagnostic := ProbeRpcNodeWithDiagnostic(mdb.RpcNode{Network: mdb.NetworkBsc, Type: mdb.RpcNodeTypeHttp, Url: nodeURL})
+			if status != mdb.RpcNodeStatusDown || latency != -1 {
+				t.Fatalf("probe = (%s, %d), want (down, -1)", status, latency)
+			}
+			if diagnostic == nil || diagnostic.Stage != tc.stage || diagnostic.Category != tc.category || diagnostic.RPCCode == nil || *diagnostic.RPCCode != tc.code {
+				t.Fatalf("diagnostic = %+v, want stage=%s category=%s code=%d", diagnostic, tc.stage, tc.category, tc.code)
+			}
+			encoded, err := json.Marshal(diagnostic)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, forbidden := range []string{"secret", "http://", "127.0.0.1", tc.message} {
+				if strings.Contains(string(encoded), forbidden) {
+					t.Fatalf("diagnostic exposed provider content: %s", encoded)
+				}
+			}
+		})
+	}
+}
+
+func TestRpcHealthJobLogsSafeFailureOnlyOnTransition(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "rate limit: provider-echoed-secret "+r.URL.String(), http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+	node := mdb.RpcNode{Network: mdb.NetworkBsc, Type: mdb.RpcNodeTypeHttp,
+		Url:     strings.Replace(server.URL, "http://", "http://user-secret:password-secret@", 1) + "/path-secret?key=query-secret",
+		Enabled: true, Status: mdb.RpcNodeStatusUnknown}
+	if err := dao.Mdb.Create(&node).Error; err != nil {
+		t.Fatal(err)
+	}
+	core, observed := observer.New(zapcore.ErrorLevel)
+	previousLogger := epLog.Sugar
+	epLog.Sugar = zap.New(core).Sugar()
+	t.Cleanup(func() { epLog.Sugar = previousLogger })
+	job := RpcHealthJob{}
+	job.Run()
+	job.Run()
+	entries := observed.FilterMessage("[rpc-health] capability probe failed").All()
+	if len(entries) != 1 {
+		t.Fatalf("logged %d failures, want one transition", len(entries))
+	}
+	encoded, err := json.Marshal(entries[0].ContextMap())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "secret") || strings.Contains(string(encoded), "http://") {
+		t.Fatalf("log exposed endpoint/provider content: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"category":"rate_limited"`) || !strings.Contains(string(encoded), `"http_status":429`) || !strings.Contains(string(encoded), `"stage":"block_header"`) {
+		t.Fatalf("log lacks safe classification: %s", encoded)
+	}
+	stored, err := data.GetRpcNodeByID(node.ID)
+	if err != nil || stored.Status != mdb.RpcNodeStatusDown || stored.LastLatencyMs != -1 {
+		t.Fatalf("stored health = %+v, err=%v", stored, err)
+	}
+}
+
+func TestRpcProbeDiagnosticTimeoutAndSafeErrorWrapper(t *testing.T) {
+	err := &rpcProbeError{stage: rpcProbeStageConnection, cause: errors.Join(context.DeadlineExceeded, errors.New("password-secret"))}
+	diagnostic := rpcProbeDiagnostic(err)
+	if diagnostic == nil || diagnostic.Stage != "connection" || diagnostic.Category != "timeout" {
+		t.Fatalf("timeout diagnostic = %+v", diagnostic)
+	}
+	if strings.Contains(err.Error(), "secret") {
+		t.Fatalf("error wrapper exposed cause: %s", err)
+	}
+}
+
+func TestRpcProbeDiagnosticUnsupportedNotifications(t *testing.T) {
+	diagnostic := rpcProbeDiagnostic(&rpcProbeError{stage: rpcProbeStageSubscription, cause: rpc.ErrNotificationsUnsupported})
+	if diagnostic == nil || diagnostic.Stage != "subscription" || diagnostic.Category != "unsupported" {
+		t.Fatalf("unsupported notifications diagnostic = %+v", diagnostic)
 	}
 }
 

@@ -363,9 +363,9 @@ func TestCreateTransactionFailsWhenRateAPIUnavailableAndForcedSettingIsNotPositi
 	defer cleanup()
 	t.Setenv("API_RATE_URL", "")
 	// Empty configuration now resolves to the default provider. Simulate
-	// its outage explicitly instead of allowing this test to access the web.
+	// both official endpoints being unavailable without accessing the web.
 	installMockHTTPClient(t, func(r *http.Request) (*http.Response, error) {
-		if r.URL.String() != config.DefaultRateAPIURL+"/cny.json" {
+		if r.URL.String() != config.DefaultRateAPIURL+"/cny.json" && r.URL.String() != config.DefaultRateFallbackURL+"/cny.json" {
 			t.Fatalf("unexpected default rate source: %s", r.URL)
 		}
 		return nil, fmt.Errorf("rate provider unavailable")
@@ -384,6 +384,55 @@ func TestCreateTransactionFailsWhenRateAPIUnavailableAndForcedSettingIsNotPositi
 	_, err := CreateTransaction(newCreateTransactionRequest("order_missing_rate_1", 10), nil)
 	if err != constant.RateAmountErr {
 		t.Fatalf("create transaction error = %v, want %v", err, constant.RateAmountErr)
+	}
+	var count int64
+	if err := dao.Mdb.Model(&mdb.Orders{}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("unavailable rates created an order: count=%d err=%v", count, err)
+	}
+}
+
+func TestCreateTransactionWithOfficialRateFallbackLocksCheckoutPrice(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+	t.Setenv("API_RATE_URL", "")
+	for key, value := range map[string]string{"rate.mode": config.RateModeAuto, "rate.api_url": config.DefaultRateAPIURL} {
+		if err := data.SetSetting("rate", key, value, "string"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := data.AddWalletAddress("wallet_official_fallback"); err != nil {
+		t.Fatal(err)
+	}
+	rate := "0.125"
+	installMockHTTPClient(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() == config.DefaultRateAPIURL+"/cny.json" {
+			return nil, fmt.Errorf("primary unavailable")
+		}
+		if r.URL.String() != config.DefaultRateFallbackURL+"/cny.json" {
+			t.Fatalf("unexpected rate endpoint: %s", r.URL)
+		}
+		body := fmt.Sprintf(`{"date":%q,"cny":{"usdt":%s}}`, time.Now().UTC().Format(time.DateOnly), rate)
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})
+	// The merchant has already discounted 100 by 10%; the gateway receives 90.
+	created, err := CreateTransaction(newCreateTransactionRequest("order_official_fallback", 90), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ActualAmount != 11.25 {
+		t.Fatalf("discounted amount converted to %v, want 11.25", created.ActualAmount)
+	}
+	rate = "0.2"
+	if refreshed := config.RefreshRateBase("cny", true); !refreshed.OK {
+		t.Fatalf("new quote unavailable: %+v", refreshed)
+	}
+	order, err := GetOrderInfoByTradeId(created.TradeId)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkout := buildCheckoutResponse(order)
+	if checkout.ActualAmount != 11.25 || checkout.ConversionRate != "0.125" || checkout.ReceiveAddress != created.ReceiveAddress {
+		t.Fatalf("later quote changed existing checkout: %+v", checkout)
 	}
 }
 

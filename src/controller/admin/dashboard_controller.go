@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/GMWalletApp/epusdt/model/data"
+	"github.com/GMWalletApp/epusdt/task"
 	"github.com/labstack/echo/v4"
 )
 
@@ -78,8 +79,9 @@ type rpcStatsStreamEnvelope struct {
 // RpcHealthCheckResponse is the response for a health check probe.
 type RpcHealthCheckResponse struct {
 	// 健康状态 unknown=未知 ok=正常 down=异常
-	Status        string `json:"status" example:"ok" enums:"unknown,ok,down"`
-	LastLatencyMs int    `json:"last_latency_ms" example:"120"`
+	Status        string                   `json:"status" example:"ok" enums:"unknown,ok,down"`
+	LastLatencyMs int                      `json:"last_latency_ms" example:"120"`
+	Diagnostic    *task.RpcProbeDiagnostic `json:"diagnostic,omitempty"`
 }
 
 // ApiKeyStatsResponse is the response for API key usage stats.
