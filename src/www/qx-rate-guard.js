@@ -1,7 +1,8 @@
-const $ = (id) => document.getElementById(id);
+export function mount(root, { signal }) {
+const $ = (id) => root.getElementById(id);
 const form = $('policy');
 let language=(document.cookie.match(/(?:^|; )PARAGLIDE_LOCALE=([^;]+)/)?.[1]||localStorage.getItem('qx-rate-language')||navigator.language).startsWith('zh')?'zh':'en';
-const zh = Object.fromEntries([...document.querySelectorAll('[data-i18n]')].map(el => [el.dataset.i18n, el.textContent]));
+const zh = Object.fromEntries([...root.querySelectorAll('[data-i18n]')].map(el => [el.dataset.i18n, el.textContent]));
 const en = {
  navHome:'USDT-QX · Admin',navPay:'Payment settings',navRates:'Verified rates',navSecurity:'Login security',effectiveTitle:'Effective settings',savedState:'This status reflects saved settings. Form changes take effect after saving.',setupTitle:'To enable verification',sourceNote:'The built-in default source updates daily. Its primary and backup addresses serve the same data; only the two providers on this page perform a cross-provider price check.',
  fallbackTitle:'Per-order fixed fallback',fallbackEnable:'Use a fixed price when an automatic quote is unavailable',fallbackNote:'Each quote tries both providers first. A still-valid trusted quote can be reused; only an unusable automatic quote falls back. The next order tries again without changing the global mode. Enabling this increases provider requests.',fallbackPrice:'Fixed price: billing currency per 1 USDT',fallbackExpiry:'Fixed price valid until (local time, optional)',fallbackExpiryNote:'Leave blank for no expiry. A continuing outage may still cause consecutive orders to use the fixed price. Keep alerts enabled and review the price.',back:'← Back to rate settings',title:'Verified USDT rates',subtitle:'CoinMarketCap quotes, checked against CoinGecko. Automatic quotes first, with optional per-order fixed fallback.',current:'Provider verification history',spread:'Provider difference',refresh:'Check providers now',policy:'Quote protection',enable:'Enable in automatic mode',scope:'Converts the selected billing currency to USDT on all USDT payment networks. Other automatic pairs will be unavailable when enabled. Fixed mode keeps its existing rules.',currency:'Order billing currency',plan:'CoinGecko plan',keys:'Keys are never displayed. Leave blank to keep a saved key. Use a plan licensed for your commercial use; selecting Demo does not establish commercial permission.',bounds:'Price limits · billing currency per 1 USDT',reference:'Manually verified reference',min:'Minimum acceptable price',max:'Maximum acceptable price',referenceNote:'The reference is set by the administrator and does not drift with provider data. Review and update it after a genuine large market move.',maxSpread:'Maximum provider difference (%)',maxJump:'Maximum reference / previous quote change (%)',interval:'Refresh interval (seconds)',maxAge:'Maximum source quote age (seconds)',skew:'Maximum provider time difference (seconds)',failureNote:'Temporary outages may use a still-valid verified quote. Conflicting or anomalous prices immediately pause quotes. When enabled, a fixed price may cover the current order. Thresholds are adjustable starting values, not guarantees.',save:'Save settings',saveNote:'Saving changed settings invalidates the old configuration’s quotes until rechecked.',alerts:'Rate alerts',alertsNote:'Subscribe existing notification channels to rate alerts. Continuing failures notify at most every 15 minutes. The notification channel must also be enabled.',footer:'Discounts apply before currency conversion. Existing orders keep their payable amount.'
@@ -11,19 +12,19 @@ let latest;
 function applyLanguage(){
  document.documentElement.lang=language==='zh'?'zh-CN':'en';
  document.title='USDT-QX · '+t('双源汇率','Verified rates');
- for(const el of document.querySelectorAll('[data-i18n]')) el.textContent=(language==='zh'?zh:en)[el.dataset.i18n];
- $('language').textContent=language==='zh'?'English':'中文';
+ for(const el of root.querySelectorAll('[data-i18n]')) el.textContent=(language==='zh'?zh:en)[el.dataset.i18n];
+
  if(latest)render(latest,false);
 }
-$('language').onclick=()=>{language=language==='zh'?'en':'zh';localStorage.setItem('qx-rate-language',language);document.cookie='PARAGLIDE_LOCALE='+(language==='zh'?'zh-CN':'en-US')+'; Path=/; SameSite=Lax; Max-Age=34560000';message('');applyLanguage();loadChannels();};
-function message(text,error=false){$('notice').textContent=text;$('notice').dataset.error=String(error);}
+function message(text,error=false){if(signal.aborted)return;$('notice').textContent=text;$('notice').dataset.error=String(error);}
 function token(){try {const raw=document.cookie.split('; ').find(v=>v.startsWith('access_token='));return raw?JSON.parse(decodeURIComponent(raw.slice('access_token='.length))):'';}catch{return '';}}
 async function api(path,method='GET',body){
  const accessToken=token();
- if(!accessToken){location.replace('/sign-in?redirect='+encodeURIComponent('/qx-rate-guard.html'));throw Error(t('请先登录。','Please sign in.'));}
- const response=await fetch('/admin/api/v1'+path,{method,headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});
- if(response.status===401){location.replace('/sign-in?redirect='+encodeURIComponent('/qx-rate-guard.html'));throw Error(t('登录已过期。','Session expired.'));}
- const result=await response.json();
+ if(!accessToken){location.replace('/sign-in?redirect='+encodeURIComponent('/settings/verified-rates'));throw Error(t('请先登录。','Please sign in.'));}
+ const response=await fetch('/admin/api/v1'+path,{method,headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal});
+ signal.throwIfAborted();
+ if(response.status===401){location.replace('/sign-in?redirect='+encodeURIComponent('/settings/verified-rates'));throw Error(t('登录已过期。','Session expired.'));}
+ const result=await response.json();signal.throwIfAborted();
  if(!response.ok || (result.status_code!==undefined && result.status_code!==200 && result.status_code!==0)) throw Error(t('保存或请求失败，请检查配置和登录状态。','Request failed. Check the configuration and session.'));
  return result.data;
 }
@@ -86,7 +87,9 @@ async function loadChannels(){
  input.onchange=async()=>{const selected=input.checked;input.disabled=true;try{await api('/notification-channels/'+row.id,'PATCH',{events:{...events,rate_alert:selected}});events.rate_alert=selected;message(t('通知订阅已更新。','Alert subscription updated.'));}catch(e){input.checked=!selected;message(e.message,true);}finally{input.disabled=false;}};
  box.append(name,input);parent.append(box);
  }
- }catch{ $('channels').textContent=t('通知渠道暂时无法读取。','Notification channels could not be loaded.'); }
+ }catch{ if(signal.aborted)return; $('channels').textContent=t('通知渠道暂时无法读取。','Notification channels could not be loaded.'); }
 }
 applyLanguage();
-try{render(await api('/settings/rate/verified'));await loadChannels();}catch(e){message(e.message,true);form.querySelector('[type=submit]').disabled=true;}
+(async()=>{try{render(await api('/settings/rate/verified'));await loadChannels();}catch(e){message(e.message,true);form.querySelector('[type=submit]').disabled=true;}})();
+
+}
